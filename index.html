@@ -1797,25 +1797,52 @@
             
             const lm = smoothedLandmarks;
             
-            // Set simple white stick figure style
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.fillStyle = '#FFFFFF';
-            ctx.lineWidth = 3;
-            ctx.shadowBlur = 0;
+            // Set bright neon stick figure style
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.shadowBlur = 20;
             
-            // Draw stick figure connections (simple lines)
+            // Draw stick figure connections with neon colors
             const connections = [
-                [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], // Face/Head
-                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Arms
-                [11, 23], [12, 24], [23, 24], // Torso
-                [23, 25], [25, 27], [24, 26], [26, 28] // Legs
+                // Head/Neck - Neon Pink
+                {start: 0, end: 1, color: '#FF1493'},
+                {start: 1, end: 2, color: '#FF1493'},
+                {start: 2, end: 3, color: '#FF1493'},
+                {start: 3, end: 7, color: '#FF1493'},
+                {start: 0, end: 4, color: '#FF1493'},
+                {start: 4, end: 5, color: '#FF1493'},
+                {start: 5, end: 6, color: '#FF1493'},
+                {start: 6, end: 8, color: '#FF1493'},
+                
+                // Arms - Neon Blue
+                {start: 11, end: 12, color: '#00FFFF'},
+                {start: 11, end: 13, color: '#00FFFF'},
+                {start: 13, end: 15, color: '#00FFFF'},
+                {start: 12, end: 14, color: '#00FFFF'},
+                {start: 14, end: 16, color: '#00FFFF'},
+                
+                // Torso - Neon Green
+                {start: 11, end: 23, color: '#39FF14'},
+                {start: 12, end: 24, color: '#39FF14'},
+                {start: 23, end: 24, color: '#39FF14'},
+                
+                // Legs - Neon Yellow
+                {start: 23, end: 25, color: '#FFFF00'},
+                {start: 25, end: 27, color: '#FFFF00'},
+                {start: 24, end: 26, color: '#FFFF00'},
+                {start: 26, end: 28, color: '#FFFF00'}
             ];
             
-            // Draw bone segments
-            connections.forEach(([start, end]) => {
+            // Draw bone segments with neon glow
+            connections.forEach(({start, end, color}) => {
                 const startLandmark = lm[start];
                 const endLandmark = lm[end];
                 if (startLandmark && endLandmark) {
+                    ctx.strokeStyle = color;
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 15;
+                    ctx.globalAlpha = 0.9;
+                    
                     ctx.beginPath();
                     ctx.moveTo(startLandmark.x * canvas.width, startLandmark.y * canvas.height);
                     ctx.lineTo(endLandmark.x * canvas.width, endLandmark.y * canvas.height);
@@ -1823,14 +1850,48 @@
                 }
             });
             
-            // Draw joints as circles
-            lm.forEach((landmark, index) => {
+            // Draw joints as bright neon circles
+            const jointColors = {
+                0: '#FF1493',   // Head - Deep Pink
+                11: '#00FFFF',  // Left Shoulder - Cyan
+                12: '#00FFFF',  // Right Shoulder - Cyan
+                13: '#00FFFF',  // Left Elbow - Cyan
+                14: '#00FFFF',  // Right Elbow - Cyan
+                15: '#FF6600',  // Left Wrist - Orange
+                16: '#FF6600',  // Right Wrist - Orange
+                23: '#39FF14',  // Left Hip - Neon Green
+                24: '#39FF14',  // Right Hip - Neon Green
+                25: '#FFFF00',  // Left Knee - Yellow
+                26: '#FFFF00',  // Right Knee - Yellow
+                27: '#FF00FF',  // Left Ankle - Magenta
+                28: '#FF00FF'   // Right Ankle - Magenta
+            };
+            
+            Object.entries(jointColors).forEach(([index, color]) => {
+                const landmark = lm[index];
                 if (landmark) {
+                    ctx.fillStyle = color;
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 25;
+                    ctx.globalAlpha = 1.0;
+                    
+                    // Outer glow
                     ctx.beginPath();
-                    ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 5, 0, Math.PI * 2);
+                    ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Bright center
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.shadowBlur = 0;
+                    ctx.beginPath();
+                    ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 3, 0, Math.PI * 2);
                     ctx.fill();
                 }
             });
+            
+            // Reset effects
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1.0;
         }
         
         function drawNeonLine(start, end) {
