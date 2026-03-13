@@ -345,8 +345,8 @@
         </button>
         
         <button class="filter-btn" data-filter="1">
-            <span class="emoji">💀</span>
-            <span>Bone Carnival</span>
+            <span class="emoji">👤</span>
+            <span>Stick Man</span>
             <span class="shortcut">2</span>
         </button>
         
@@ -1084,7 +1084,7 @@
             if (smoothedLandmarks.length > 0) {
                 switch (currentFilter) {
                     case 0: renderNeonSpecter(); break;
-                    case 1: renderHumanStick(); break;
+                    case 1: renderStickMan(); break;
                     case 2: renderPhantomEcho(); break;
                     case 3: renderSilkStream(); break;
                     case 4: renderInkFury(); break;
@@ -1782,158 +1782,55 @@
             }, 1500);
         }
         
-        // FILTER 2: HUMAN STICK (Dual Panel - Webcam + Colored Stick Figure)
-        function renderHumanStick() {
-            // Split canvas into two panels
-            const panelWidth = canvas.width / 2;
-            const panelHeight = canvas.height;
-            
-            // Clear entire canvas
+        // FILTER 2: STICK MAN (Simple Stick Figure)
+        function renderStickMan() {
+            // Pure black background
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Draw vertical separator line
-            ctx.strokeStyle = '#333333';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(panelWidth, 0);
-            ctx.lineTo(panelWidth, panelHeight);
-            ctx.stroke();
-            
-            // LEFT PANEL: Original webcam feed with skeleton overlay
-            if (showWebcamFeed) {
-                // Draw webcam feed
-                ctx.drawImage(video, 0, 0, panelWidth, panelHeight);
-            } else {
-                // Black background if webcam hidden
-                ctx.fillStyle = '#000000';
-                ctx.fillRect(0, 0, panelWidth, panelHeight);
-            }
-            
-            // Draw skeleton overlay on left panel
-            drawSkeletonOverlay(0, 0, panelWidth, panelHeight, false);
-            
-            // RIGHT PANEL: Pure black background with colored stick figure
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(panelWidth, 0, panelWidth, panelHeight);
-            
-            // Draw perspective grid on right panel
-            drawPerspectiveGrid(panelWidth, 0, panelWidth, panelHeight);
-            
-            // Draw colored stick figure on right panel (mirrored)
-            drawColoredStickFigure(panelWidth, 0, panelWidth, panelHeight, true);
+            // Draw simple stick figure
+            drawSimpleStickFigure();
         }
         
-        function drawNeonStickFigure() {
+        function drawSimpleStickFigure() {
             if (smoothedLandmarks.length === 0) return;
             
             const lm = smoothedLandmarks;
             
-            // Set neon glow effect
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = '#00FFFF'; // Neon cyan glow
-            ctx.strokeStyle = '#00FFFF'; // Neon cyan lines
-            ctx.fillStyle = '#FFFFFF'; // White joints
+            // Set simple white stick figure style
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.lineWidth = 3;
+            ctx.shadowBlur = 0;
             
-            // Draw head (circle with neon glow)
-            const head = lm[0];
-            if (head) {
-                ctx.lineWidth = 4;
-                ctx.globalAlpha = 0.9;
-                ctx.beginPath();
-                ctx.arc(head.x * canvas.width, head.y * canvas.height, 25, 0, Math.PI * 2);
-                ctx.stroke();
-                
-                // Inner bright circle
-                ctx.fillStyle = '#FFFFFF';
-                ctx.beginPath();
-                ctx.arc(head.x * canvas.width, head.y * canvas.height, 15, 0, Math.PI * 2);
-                ctx.fill();
-            }
+            // Draw stick figure connections (simple lines)
+            const connections = [
+                [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], // Face/Head
+                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Arms
+                [11, 23], [12, 24], [23, 24], // Torso
+                [23, 25], [25, 27], [24, 26], [26, 28] // Legs
+            ];
             
-            // Draw body (torso)
-            const leftShoulder = lm[11];
-            const rightShoulder = lm[12];
-            const leftHip = lm[23];
-            const rightHip = lm[24];
-            
-            if (leftShoulder && rightShoulder && leftHip && rightHip) {
-                ctx.lineWidth = 6;
-                ctx.globalAlpha = 0.8;
-                
-                // Torso rectangle with rounded edges
-                const torsoTop = (leftShoulder.y + rightShoulder.y) / 2 * canvas.height;
-                const torsoHeight = ((leftHip.y + rightHip.y) / 2 - (leftShoulder.y + rightShoulder.y) / 2) * canvas.height;
-                const torsoWidth = Math.abs(leftShoulder.x - rightShoulder.x) * canvas.width;
-                
-                ctx.beginPath();
-                ctx.roundRect(
-                    (leftShoulder.x + rightShoulder.x) / 2 * canvas.width - torsoWidth / 2,
-                    torsoTop,
-                    torsoWidth,
-                    torsoHeight,
-                    10
-                );
-                ctx.stroke();
-            }
-            
-            // Draw arms (lines)
-            const leftElbow = lm[13];
-            const leftWrist = lm[15];
-            const rightElbow = lm[14];
-            const rightWrist = lm[16];
-            
-            ctx.lineWidth = 4;
-            ctx.globalAlpha = 0.7;
-            
-            // Left arm
-            if (leftShoulder && leftElbow && leftWrist) {
-                drawNeonLine(leftShoulder, leftElbow);
-                drawNeonLine(leftElbow, leftWrist);
-            }
-            
-            // Right arm
-            if (rightShoulder && rightElbow && rightWrist) {
-                drawNeonLine(rightShoulder, rightElbow);
-                drawNeonLine(rightElbow, rightWrist);
-            }
-            
-            // Draw legs (lines)
-            const leftKnee = lm[25];
-            const leftAnkle = lm[27];
-            const rightKnee = lm[26];
-            const rightAnkle = lm[28];
-            
-            // Left leg
-            if (leftHip && leftKnee && leftAnkle) {
-                drawNeonLine(leftHip, leftKnee);
-                drawNeonLine(leftKnee, leftAnkle);
-            }
-            
-            // Right leg
-            if (rightHip && rightKnee && rightAnkle) {
-                drawNeonLine(rightHip, rightKnee);
-                drawNeonLine(rightKnee, rightAnkle);
-            }
-            
-            // Draw joints (bright circles)
-            ctx.globalAlpha = 1.0;
-            const joints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-            joints.forEach(index => {
-                const joint = lm[index];
-                if (joint) {
-                    ctx.shadowBlur = 20;
-                    ctx.shadowColor = '#FFFFFF';
-                    ctx.fillStyle = '#FFFFFF';
+            // Draw bone segments
+            connections.forEach(([start, end]) => {
+                const startLandmark = lm[start];
+                const endLandmark = lm[end];
+                if (startLandmark && endLandmark) {
                     ctx.beginPath();
-                    ctx.arc(joint.x * canvas.width, joint.y * canvas.height, 8, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.moveTo(startLandmark.x * canvas.width, startLandmark.y * canvas.height);
+                    ctx.lineTo(endLandmark.x * canvas.width, endLandmark.y * canvas.height);
+                    ctx.stroke();
                 }
             });
             
-            // Reset effects
-            ctx.shadowBlur = 0;
-            ctx.globalAlpha = 1.0;
+            // Draw joints as circles
+            lm.forEach((landmark, index) => {
+                if (landmark) {
+                    ctx.beginPath();
+                    ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
         }
         
         function drawNeonLine(start, end) {
