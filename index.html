@@ -876,7 +876,7 @@
                                 if (frameSkipCounter % DETECTION_INTERVAL !== 0) return;
                                 
                                 // Run pose detection for most filters
-                                if (pose && cameraOn && currentFilter !== 1) {
+                                if (pose && cameraOn && currentFilter !== 3) {
                                     try {
                                         await pose.send({ image: video });
                                     } catch (error) {
