@@ -1,0 +1,2851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MotionAura - Interactive Motion Tracking</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 220px;
+            height: 100vh;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            border-right: 1px solid #333;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 1000;
+        }
+
+        .app-title {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .app-title h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(45deg, #00ffff, #ff00ff);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 5px;
+        }
+
+        .app-title .subtitle {
+            font-size: 12px;
+            color: #00ffff;
+            text-shadow: 0 0 10px #00ffff;
+            opacity: 0.8;
+        }
+
+        .filter-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid transparent;
+            color: #fff;
+            padding: 12px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+        }
+
+        .filter-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateX(5px);
+        }
+
+        .filter-btn.active {
+            border-color: #00ffff;
+            background: rgba(0, 255, 255, 0.1);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+
+        .filter-btn .emoji {
+            font-size: 18px;
+        }
+
+        .filter-btn .shortcut {
+            position: absolute;
+            right: 15px;
+            font-size: 11px;
+            opacity: 0.6;
+        }
+
+        .camera-toggle {
+            background: #333;
+            border: 2px solid #666;
+            color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .camera-toggle.on {
+            background: rgba(0, 255, 0, 0.2);
+            border-color: #00ff00;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+        }
+
+        .camera-toggle.off {
+            background: rgba(255, 0, 0, 0.2);
+            border-color: #ff0000;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+        }
+
+        .fps-counter {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 14px;
+            color: #00ff00;
+            margin-top: auto;
+        }
+
+        .clear-btn {
+            background: rgba(255, 0, 0, 0.2);
+            border: 2px solid #ff0000;
+            color: #fff;
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            text-align: center;
+            display: none;
+        }
+
+        .clear-btn:hover {
+            background: rgba(255, 0, 0, 0.4);
+        }
+
+        .record-btn {
+            background: rgba(255, 0, 0, 0.2);
+            border: 2px solid #ff0000;
+            color: #fff;
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .record-btn:hover {
+            background: rgba(255, 0, 0, 0.4);
+        }
+
+        .record-btn.recording {
+            background: rgba(255, 0, 0, 0.6);
+            border-color: #ff0000;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.8);
+            animation: pulse 1s infinite;
+        }
+
+        .top-controls {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+        }
+
+        .main-canvas {
+            position: fixed;
+            left: 220px;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            background: #000;
+        }
+
+        #mainCanvas {
+            width: calc(100% - 220px);
+            height: 100vh;
+            display: block;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .pip-box {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 240px;
+            height: 180px;
+            background: #000;
+            border: 2px solid #00ffff;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+            cursor: move;
+            z-index: 999;
+            display: none;
+        }
+
+        .pip-box video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .no-pose-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            color: #666;
+            text-align: center;
+            animation: pulse 2s infinite;
+            display: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+
+        .error-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .error-card {
+            background: #1a1a1a;
+            border: 2px solid #ff0000;
+            border-radius: 10px;
+            padding: 30px;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .error-card h2 {
+            color: #ff0000;
+            margin-bottom: 15px;
+        }
+
+        .error-card button {
+            background: #ff0000;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        .gesture-text {
+            position: fixed;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 32px;
+            font-weight: bold;
+            color: #00ffff;
+            text-shadow: 0 0 20px #00ffff;
+            display: none;
+            z-index: 1500;
+        }
+
+        .hint-overlay {
+            position: fixed;
+            bottom: 20px;
+            left: 240px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            font-size: 12px;
+            color: #666;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="app-title">
+            <h1>MotionAura</h1>
+            <div class="subtitle">Interactive Motion Tracking</div>
+        </div>
+        
+        <button class="filter-btn active" data-filter="0">
+            <span class="emoji">🌟</span>
+            <span>Neon Specter</span>
+            <span class="shortcut">1</span>
+        </button>
+        
+        <button class="filter-btn" data-filter="1">
+            <span class="emoji">💀</span>
+            <span>Bone Carnival</span>
+            <span class="shortcut">2</span>
+        </button>
+        
+        <button class="filter-btn" data-filter="2">
+            <span class="emoji">👥</span>
+            <span>Phantom Echo</span>
+            <span class="shortcut">3</span>
+        </button>
+        
+        <button class="filter-btn" data-filter="3">
+            <span class="emoji">🎀</span>
+            <span>Silk Stream</span>
+            <span class="shortcut">4</span>
+        </button>
+        
+        <button class="filter-btn" data-filter="4">
+            <span class="emoji">🥊</span>
+            <span>Ink Fury</span>
+            <span class="shortcut">5</span>
+        </button>
+        
+        <button class="camera-toggle off" id="cameraToggle">
+            📷 Camera OFF
+        </button>
+        
+        <button class="clear-btn" id="clearBtn">
+            🗑 CLEAR (X)
+        </button>
+        
+        <div class="fps-counter">
+            FPS: <span id="fps">0</span>
+        </div>
+    </div>
+    
+    <!-- Top Controls -->
+    <div class="top-controls">
+        <button class="record-btn" id="recordBtn">
+            🔴 REC
+        </button>
+    </div>
+    
+    <div class="main-canvas">
+        <canvas id="mainCanvas"></canvas>
+    </div>
+    
+    <div class="pip-box" id="pipBox">
+        <video id="videoElement" autoplay playsinline></video>
+    </div>
+    
+    <div class="no-pose-message" id="noPoseMessage">
+        🧍 No Human Detected
+    </div>
+    
+    <div class="gesture-text" id="gestureText"></div>
+    
+    <div class="error-overlay" id="errorOverlay">
+        <div class="error-card">
+            <h2>Camera Error</h2>
+            <p id="errorMessage">Unable to access camera</p>
+            <button onclick="retryCamera()">Retry</button>
+        </div>
+    </div>
+    
+    <div class="hint-overlay" id="hintOverlay">
+        💡 Try better lighting
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
+
+    <script>
+        // Global variables
+        let canvas, ctx;
+        let video;
+        let cameraOn = false;
+        let currentFilter = 0;
+        let pose, hands, selfieSegmentation;
+        let camera;
+        
+        // Recording variables
+        let mediaRecorder;
+        let recordedChunks = [];
+        let isRecording = false;
+        let recordingStartTime;
+        
+        // Pose tracking data
+        let landmarks = [];
+        let smoothedLandmarks = [];
+        let previousLandmarks = [];
+        let poseHistory = [];
+        let lastPoseTime = Date.now();
+        
+        // Filter-specific data
+        let motionTrail = [];
+        let particles = [];
+        let jointHistory = {};
+        let poseBuffer = [];
+        let segmentationMask = null;
+        let handsResults = null;
+        
+        function resetFilterData() {
+            motionTrail = [];
+            particles = [];
+            inkParticles = [];
+            splatBlobs = [];
+            inkDrips = [];
+            mistParticles = [];
+            impactRings = [];
+            poseBuffer = [];
+            jointHistory = {};
+            console.log("Filter data reset - all particles and trails cleared");
+        }
+        
+        // Performance
+        let targetParticles = 800;
+        
+        // Body connections for MediaPipe Pose
+        const bodyConnections = [
+            [11,12],[11,13],[13,15],[12,14],[14,16],  // arms
+            [11,23],[12,24],[23,24],                   // torso
+            [23,25],[25,27],[24,26],[26,28],           // legs
+            [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8], // face
+            [15,17],[15,19],[16,18],[16,20]            // hands
+        ];
+        
+        // Initialize application
+        function init() {
+            canvas = document.getElementById('mainCanvas');
+            ctx = canvas.getContext('2d');
+            video = document.getElementById('videoElement');
+            
+            // Check if elements exist before proceeding
+            if (!canvas || !ctx || !video) {
+                console.error('Required elements not found');
+                return;
+            }
+            
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Initialize offscreen canvas for ink
+            inkCanvas = document.createElement('canvas');
+            inkCtx = inkCanvas.getContext('2d');
+            
+            // Initialize MediaPipe
+            initializeMediaPipe();
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Start render loop
+            requestAnimationFrame(render);
+        }
+        
+        function resizeCanvas() {
+            if (!canvas) return;
+            
+            canvas.width = window.innerWidth - 220;
+            canvas.height = window.innerHeight;
+            
+            if (inkCanvas) {
+                inkCanvas.width = canvas.width;
+                inkCanvas.height = canvas.height;
+            }
+        }
+        
+        function initializeMediaPipe() {
+            // Initialize Pose
+            pose = new Pose({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+                }
+            });
+            
+            pose.setOptions({
+                modelComplexity: 0, // Use simplest model for best performance
+                smoothLandmarks: true,
+                minDetectionConfidence: 0.3, // Lower threshold for easier detection
+                minTrackingConfidence: 0.3, // Lower threshold for better tracking
+                enableSegmentation: false // Disable for performance
+            });
+            
+            pose.onResults(onPoseResults);
+            
+            // Initialize Hands (for Aura Bloom)
+            hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }
+            });
+            
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 0, // Use simplest model for performance
+                minDetectionConfidence: 0.4, // Lower threshold for easier detection
+                minTrackingConfidence: 0.4 // Lower threshold for better tracking
+            });
+            
+            hands.onResults(onHandsResults);
+            
+            // Initialize Selfie Segmentation (for Aura Bloom)
+            selfieSegmentation = new SelfieSegmentation({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+                }
+            });
+            
+            selfieSegmentation.setOptions({
+                modelSelection: 1
+            });
+            
+            selfieSegmentation.onResults(onSegmentationResults);
+        }
+        
+        function setupEventListeners() {
+            // Filter buttons
+            const filterButtons = document.querySelectorAll('.filter-btn');
+            filterButtons.forEach(btn => {
+                // Remove existing listeners to prevent duplicates
+                const newBtn = btn.cloneNode(true);
+                btn.parentNode.replaceChild(newBtn, btn);
+                
+                // Handle multiple event types for better compatibility
+                const clickHandler = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const filterIndex = parseInt(newBtn.dataset.filter);
+                    const buttonText = newBtn.textContent.trim();
+                    console.log(`Filter button clicked: ${filterIndex} - "${buttonText}" - data-filter: ${newBtn.dataset.filter}`);
+                    
+                    // Validate the filter index
+                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 4) {
+                        console.error(`Invalid filter index: ${filterIndex}`);
+                        return;
+                    }
+                    
+                    switchFilter(filterIndex);
+                };
+                
+                // Mouse events
+                newBtn.addEventListener('click', clickHandler);
+                newBtn.addEventListener('mousedown', clickHandler);
+                
+                // Touch events for mobile/trackpad
+                newBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    clickHandler();
+                });
+                
+                // Pointer events for better trackpad support
+                newBtn.addEventListener('pointerdown', clickHandler);
+            });
+            
+            // Camera toggle
+            document.getElementById('cameraToggle').addEventListener('click', toggleCamera);
+            
+            // Clear button (for Ink Fury)
+            document.getElementById('clearBtn').addEventListener('click', resetInkCanvas);
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                switch(e.key) {
+                    case '1': switchFilter(0); break;  // Neon Specter
+                    case '2': switchFilter(1); break;  // Bone Carnival
+                    case '3': switchFilter(2); break;  // Phantom Echo
+                    case '4': switchFilter(3); break;  // Silk Stream
+                    case '5': switchFilter(4); break;  // Ink Fury
+                    case 'c': case 'C':
+                        toggleCamera();
+                        break;
+                    case 'x': case 'X':
+                        if (currentFilter === 3) resetInkCanvas(); // Clear for Silk Stream
+                        break;
+                    case 'f': case 'F':
+                        toggleFullscreen();
+                        break;
+                    case 'Escape':
+                        if (document.fullscreenElement) {
+                            document.exitFullscreen();
+                        }
+                        break;
+                }
+            });
+            
+            // Low-latency pointer events for better interaction
+            canvas.addEventListener('pointermove', handlePointerMove);
+            canvas.addEventListener('pointerdown', handlePointerDown);
+            canvas.addEventListener('pointerup', handlePointerUp);
+            
+            // Draggable PiP box
+            let isDragging = false;
+            let dragOffset = { x: 0, y: 0 };
+            
+            const pipBox = document.getElementById('pipBox');
+            
+            pipBox.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                dragOffset.x = e.clientX - pipBox.offsetLeft;
+                dragOffset.y = e.clientY - pipBox.offsetTop;
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    pipBox.style.left = (e.clientX - dragOffset.x) + 'px';
+                    pipBox.style.top = (e.clientY - dragOffset.y) + 'px';
+                    pipBox.style.bottom = 'auto';
+                    pipBox.style.right = 'auto';
+                }
+            });
+            
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+            
+            // Record button
+            const recordBtn = document.getElementById('recordBtn');
+            recordBtn.addEventListener('click', toggleRecording);
+        }
+        
+        // Recording functions
+        function toggleRecording() {
+            const recordBtn = document.getElementById('recordBtn');
+            
+            if (!isRecording) {
+                startRecording();
+                recordBtn.classList.add('recording');
+                recordBtn.textContent = '⏹ STOP';
+                console.log('Recording started');
+            } else {
+                stopRecording();
+                recordBtn.classList.remove('recording');
+                recordBtn.textContent = '🔴 REC';
+                console.log('Recording stopped');
+            }
+        }
+        
+        function startRecording() {
+            recordedChunks = [];
+            
+            const canvasStream = canvas.captureStream(30); // 30 FPS
+            const audioStream = getAudioStream();
+            
+            // Combine video and audio streams
+            const combinedStream = new MediaStream([
+                ...canvasStream.getVideoTracks(),
+                ...audioStream.getAudioTracks()
+            ]);
+            
+            mediaRecorder = new MediaRecorder(combinedStream, {
+                mimeType: 'video/webm;codecs=vp9'
+            });
+            
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+            
+            mediaRecorder.onstop = () => {
+                saveRecording();
+            };
+            
+            mediaRecorder.start();
+            isRecording = true;
+            recordingStartTime = Date.now();
+        }
+        
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                isRecording = false;
+            }
+        }
+        
+        function getAudioStream() {
+            // Create empty audio stream (no microphone input for privacy)
+            const audioContext = new AudioContext();
+            const destination = audioContext.createMediaStreamDestination();
+            return destination.stream;
+        }
+        
+        function saveRecording() {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            
+            // Create download link
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `motionaura-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            // Clean up
+            URL.revokeObjectURL(url);
+            
+            const duration = ((Date.now() - recordingStartTime) / 1000).toFixed(1);
+            console.log(`Recording saved: ${duration}s duration`);
+        }
+        
+        // Low-latency pointer event handlers
+        function handlePointerMove(e) {
+            // Add interactive effects for all filters
+            if (smoothedLandmarks.length > 0) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                // Create particle burst at pointer position for interactive effect
+                createPointerParticleBurst(x, y);
+            }
+        }
+        
+        function handlePointerDown(e) {
+            // Handle pointer down events
+        }
+        
+        function handlePointerUp(e) {
+            // Handle pointer up events
+        }
+        
+        function createPointerParticleBurst(x, y) {
+            // Create small burst of particles at pointer position
+            for (let i = 0; i < 5; i++) {
+                const angle = (Math.PI * 2 * i) / 5;
+                const speed = 2;
+                
+                particles.push(new Particle(
+                    x, y,
+                    Math.cos(angle) * speed,
+                    Math.sin(angle) * speed,
+                    0.5, // Short life for burst effect
+                    getRandomNeonColor(),
+                    3
+                ));
+            }
+            
+            // Remove oldest particles if too many
+            if (particles.length > 600) {
+                particles.splice(0, particles.length - 600);
+            }
+        }
+        
+        function switchFilter(index) {
+            currentFilter = index;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Find the correct button by data-filter attribute
+            const targetButton = document.querySelector(`[data-filter="${index}"]`);
+            if (targetButton) {
+                targetButton.classList.add('active');
+            }
+            
+            // Show/hide clear button for Silk Stream and Ink Fury
+            document.getElementById('clearBtn').style.display = 
+                (index === 3 || index === 4) ? 'block' : 'none';
+            
+            // Reset filter-specific data
+            resetFilterData();
+        }
+        
+        async function toggleCamera() {
+            console.log('Camera toggle clicked, current state:', cameraOn);
+            
+            const btn = document.getElementById('cameraToggle');
+            const pipBox = document.getElementById('pipBox');
+            
+            if (!cameraOn) {
+                try {
+                    console.log('Requesting camera access...');
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 1280, height: 720 }
+                    });
+                    
+                    console.log('Camera stream obtained');
+                    video.srcObject = stream;
+                    
+                    // Wait for video to be ready before setting up camera
+                    video.addEventListener('loadeddata', () => {
+                        console.log('Video loaded, initializing camera...');
+                        
+                        // Performance optimization variables
+        let frameSkipCounter = 0;
+        const DETECTION_INTERVAL = 1; // Process every frame for better detection
+        
+        // Initialize camera with optimized frame handling
+                        camera = new Camera(video, {
+                            onFrame: async () => {
+                                frameSkipCounter++;
+                                
+                                // Only run detection on every Nth frame for performance
+                                if (frameSkipCounter % DETECTION_INTERVAL !== 0) return;
+                                
+                                // Run pose detection for most filters
+                                if (pose && cameraOn && currentFilter !== 1) {
+                                    try {
+                                        await pose.send({ image: video });
+                                    } catch (error) {
+                                        console.error('Pose detection error:', error);
+                                    }
+                                }
+                                
+                                // Run hands detection for Silk Stream and Ink Fury filters
+                                if (hands && cameraOn && (currentFilter === 3 || currentFilter === 4)) {
+                                    try {
+                                        await hands.send({ image: video });
+                                    } catch (error) {
+                                        console.error('Hands detection error:', error);
+                                    }
+                                }
+                            },
+                            width: 960,  // Increased resolution for better detection
+                            height: 540
+                        });
+                        
+                        camera.start();
+                        cameraOn = true;
+                        
+                        btn.textContent = '📷 Camera ON';
+                        btn.classList.remove('off');
+                        btn.classList.add('on');
+                        pipBox.style.display = 'block';
+                        
+                        console.log('Camera started successfully');
+                    }, { once: true }); // Only fire once
+                    
+                } catch (error) {
+                    console.error('Camera error:', error);
+                    showError('Unable to access camera: ' + error.message);
+                }
+            } else {
+                console.log('Stopping camera...');
+                if (camera) {
+                    camera.stop();
+                }
+                
+                const stream = video.srcObject;
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
+                cameraOn = false;
+                btn.textContent = '📷 Camera OFF';
+                btn.classList.remove('on');
+                btn.classList.add('off');
+                pipBox.style.display = 'none';
+                
+                landmarks = [];
+                smoothedLandmarks = [];
+                
+                console.log('Camera stopped');
+            }
+        }
+        
+        function onPoseResults(results) {
+            if (results.poseLandmarks) {
+                landmarks = results.poseLandmarks;
+                smoothLandmarks();
+                lastPoseTime = Date.now();
+                document.getElementById('noPoseMessage').style.display = 'none';
+                console.log('✅ Pose detected - landmarks:', landmarks.length);
+            } else {
+                if (Date.now() - lastPoseTime > 2000) {
+                    document.getElementById('noPoseMessage').style.display = 'block';
+                    console.log('❌ No pose detected - check lighting and position');
+                }
+            }
+        }
+        
+        function onHandsResults(results) {
+            handsResults = results;
+            
+            // Debug logging
+            if (results.multiHandLandmarks) {
+                console.log(`✅ Hands detected: ${results.multiHandLandmarks.length} hands`);
+                if (results.multiHandedness) {
+                    results.multiHandedness.forEach((hand, index) => {
+                        console.log(`  Hand ${index}: ${hand.label} (confidence: ${hand.score.toFixed(2)})`);
+                    });
+                }
+            } else {
+                console.log('❌ No hands detected - show both hands clearly');
+            }
+            
+            // Process hand data for holographic ribbons
+            if (results.multiHandLandmarks && results.multiHandedness) {
+                processHandData(results.multiHandLandmarks, results.multiHandedness);
+            } else {
+                // No hands detected
+                updateHandLoss();
+            }
+        }
+        
+        function onSegmentationResults(results) {
+            segmentationMask = results.segmentationMask;
+        }
+        
+        function smoothLandmarks() {
+            if (landmarks.length === 0) return;
+            
+            if (smoothedLandmarks.length === 0) {
+                smoothedLandmarks = landmarks.map(l => ({ ...l }));
+            } else {
+                const lerpFactor = 0.5;
+                for (let i = 0; i < landmarks.length; i++) {
+                    smoothedLandmarks[i].x = lerp(
+                        smoothedLandmarks[i].x, 
+                        landmarks[i].x, 
+                        lerpFactor
+                    );
+                    smoothedLandmarks[i].y = lerp(
+                        smoothedLandmarks[i].y, 
+                        landmarks[i].y, 
+                        lerpFactor
+                    );
+                    smoothedLandmarks[i].z = lerp(
+                        smoothedLandmarks[i].z || 0, 
+                        landmarks[i].z || 0, 
+                        lerpFactor
+                    );
+                }
+            }
+        }
+        
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+        
+        // FPS tracking variables
+        let frameCount = 0;
+        let lastFpsUpdate = Date.now();
+        let fps = 0;
+        
+        function updateFPS() {
+            frameCount++;
+            const now = Date.now();
+            const delta = now - lastFpsUpdate;
+            
+            if (delta >= 1000) {
+                fps = Math.round((frameCount * 1000) / delta);
+                const fpsElement = document.getElementById('fps');
+                if (fpsElement) {
+                    fpsElement.textContent = fps;
+                }
+                frameCount = 0;
+                lastFpsUpdate = now;
+            }
+        }
+        
+        // Performance monitoring
+        let performanceMode = false;
+        let adaptiveQuality = true;
+        
+        function render() {
+            // Adaptive quality based on FPS
+            if (adaptiveQuality && fps < 20 && !performanceMode) {
+                performanceMode = true;
+                console.log('Performance mode activated - reducing quality');
+            } else if (adaptiveQuality && fps > 30 && performanceMode) {
+                performanceMode = false;
+                console.log('Normal mode restored');
+            }
+            
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            if (smoothedLandmarks.length > 0) {
+                switch (currentFilter) {
+                    case 0: renderNeonSpecter(); break;
+                    case 1: renderStickmanSkeleton(); break;
+                    case 2: renderPhantomEcho(); break;
+                    case 3: renderSilkStream(); break;
+                    case 4: renderInkFury(); break;
+                }
+            }
+            
+            updateFPS();
+            requestAnimationFrame(render);
+        }
+        
+        // FILTER 1: NEON SPECTER (Enhanced with Edge Detection)
+        function renderNeonSpecter() {
+            // Create offscreen canvas for edge detection
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = canvas.width;
+            offscreenCanvas.height = canvas.height;
+            const offCtx = offscreenCanvas.getContext('2d');
+            
+            // Draw video frame to offscreen canvas
+            offCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Get image data for edge detection
+            const imageData = offCtx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+            
+            // Sobel edge detection
+            const edges = new Uint8ClampedArray(width * height);
+            const sobelX = [-1, 0, 1, -1, -2, -1, 0, 1, 2, -1];
+            const sobelY = [-1, -2, -1, 0, 1, 2, 1, 0, -1];
+            
+            // Apply Sobel operators
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    let pixelX = 0, pixelY = 0;
+                    
+                    // X gradient
+                    for (let j = -1; j <= 1; j++) {
+                        for (let i = -1; i <= 1; i++) {
+                            const idx = ((y + i) * width + (x + j)) * 4;
+                            const gray = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+                            pixelX += gray * sobelX[j + 1];
+                            pixelY += gray * sobelY[j + 1];
+                        }
+                    }
+                    
+                    const magnitude = Math.sqrt(pixelX * pixelX + pixelY * pixelY);
+                    const edgeIdx = ((y + 1) * width + (x + 1)) * 4;
+                    edges[edgeIdx] = magnitude > 30 ? 255 : 0;
+                }
+            }
+            
+            bodyConnections.forEach(([start, end]) => {
+                const startLandmark = smoothedLandmarks[start];
+                const endLandmark = smoothedLandmarks[end];
+                if (startLandmark && endLandmark) {
+                    ctx.beginPath();
+                    ctx.moveTo(startLandmark.x * canvas.width, startLandmark.y * canvas.height);
+                    ctx.lineTo(endLandmark.x * canvas.width, endLandmark.y * canvas.height);
+                    ctx.stroke();
+                }
+            });
+            
+            // Draw face landmarks with neon glow
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.filter = 'none';
+            ctx.shadowBlur = 15;
+            
+            // Face points with region-specific colors
+            smoothedLandmarks.forEach((landmark, i) => {
+                const x = landmark.x * canvas.width;
+                const y = landmark.y * canvas.height;
+                
+                let color, glowColor;
+                if ([0,1,2,3,4,5,6,7,8,9,10].includes(i)) {
+                    // Face outline - orange to red gradient
+                    const hue = 350 + (i / 10) * 10;
+                    color = `hsl(${hue}, 100%, 60%)`;
+                    glowColor = `hsl(${hue}, 100%, 30%)`;
+                } else if ([11,12].includes(i)) {
+                    // Shoulders - pink
+                    color = '#FF00AA';
+                    glowColor = '#FF0066';
+                } else if ([13,14].includes(i)) {
+                    // Elbows - orange
+                    color = '#FF6600';
+                    glowColor = '#FF3300';
+                } else {
+                    // Other body points - purple
+                    color = '#9400D3';
+                    glowColor = '#4B0082';
+                }
+                
+                // Draw glow
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = glowColor;
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(x, y, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw bright center
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#FFFFFF';
+                ctx.beginPath();
+                ctx.arc(x, y, 2, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Reset composite mode
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.filter = 'none';
+            ctx.shadowBlur = 0;
+        }
+        
+        /*
+        // ========================================
+        // AURA BLOOM FILTER (REMOVED)
+        // ========================================
+        // FILTER 2: AURA BLOOM (DISABLED)
+        let auraAnimationId = null;
+        let particleWorker = null;
+        let isDetectingPose = false;
+        let detectionQueue = [];
+        let frameSkipCounter = 0;
+        
+        function renderAuraBloom() {
+            // This filter has been removed for performance
+            console.log('Aura Bloom filter has been removed');
+        }
+        
+        function startContinuousDetection() {
+            // Aura Bloom detection disabled
+        }
+        
+        function animateAuraBloom() {
+            // Aura Bloom animation disabled
+        }
+        
+        // End of removed Aura Bloom filter
+        // ========================================
+        */
+        
+        const NEON_COLORS = [
+            '#FF00FF', // Magenta
+            '#00FFFF', // Cyan
+            '#39FF14', // Neon Green
+            '#FF6600', // Orange
+            '#BF00FF', // Electric Purple
+            '#FFFF00', // Yellow
+            '#FF0055', // Hot Pink
+            '#00FF00', // Lime
+            '#FF1493', // Deep Pink
+            '#00CED1', // Dark Turquoise
+            '#FF4500', // Orange Red
+            '#9400D3'  // Violet
+        ];
+        
+        function getRandomNeonColor() {
+            return NEON_COLORS[Math.floor(Math.random() * NEON_COLORS.length)];
+        }
+        
+        class Particle {
+            constructor(x, y, vx, vy, life, color, size) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.life = life;
+                this.color = color;
+                this.size = size;
+                this.maxLife = life;
+                this.flickerSpeed = 0.05 + Math.random() * 0.1; // Random flicker speed
+                this.flickerPhase = Math.random() * Math.PI * 2; // Random starting phase
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.98;
+                this.vy *= 0.98;
+                this.life -= 0.015; // Optimized for performance
+                
+                // Add floating effect
+                this.x += Math.sin(Date.now() * 0.001 + this.flickerPhase) * 0.5;
+                this.y += Math.cos(Date.now() * 0.001 + this.flickerPhase) * 0.3;
+                
+                // Update flicker phase
+                this.flickerPhase += this.flickerSpeed;
+            }
+            
+            draw(ctx) {
+                const opacity = Math.max(0, this.life / this.maxLife);
+                
+                // Add flickering effect
+                const flickerOpacity = 0.7 + Math.sin(this.flickerPhase) * 0.3;
+                const finalOpacity = opacity * flickerOpacity;
+                
+                ctx.globalAlpha = finalOpacity;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            drawWithOptimizedGlow(ctx) {
+                const opacity = Math.max(0, this.life / this.maxLife);
+                
+                // Add flickering effect
+                const flickerOpacity = 0.7 + Math.sin(this.flickerPhase) * 0.3;
+                const finalOpacity = opacity * flickerOpacity;
+                
+                // Simplified 2-layer glow for better performance
+                ctx.globalAlpha = finalOpacity * 0.5;
+                ctx.fillStyle = this.color;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Bright core with flicker
+                ctx.globalAlpha = finalOpacity;
+                ctx.shadowBlur = 5;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.shadowBlur = 0;
+            }
+        }
+        
+        function updateAuraParticlesOptimized() {
+            if (smoothedLandmarks.length === 0) {
+                // Quick batch update for performance
+                particles.forEach(particle => {
+                    particle.life = 0;
+                });
+                return;
+            }
+            
+            // Process particles in smaller batches for better performance
+            const batchSize = 30; // Optimized batch size
+            for (let i = 0; i < particles.length; i += batchSize) {
+                const batch = particles.slice(i, i + batchSize);
+                
+                batch.forEach(particle => {
+                    if (particle.life <= 0) {
+                        // Spawn particles across entire silhouette
+                        const newPos = getRandomPointInFullSilhouette();
+                        
+                        if (newPos) {
+                            particle.x = newPos.x;
+                            particle.y = newPos.y;
+                            particle.vx = (Math.random() - 0.5) * 0.3; // More movement for energy
+                            particle.vy = (Math.random() - 0.5) * 0.3;
+                            particle.life = 1.0;
+                            particle.color = getRandomNeonColor(); // Random bright neon color
+                        }
+                    } else {
+                        particle.update();
+                    }
+                });
+            }
+        }
+        
+        function getRandomPointInFullSilhouette() {
+            // Create expanded body regions for full coverage
+            const bodyRegions = getExpandedBodyRegions();
+            
+            // Weighted selection for full silhouette coverage
+            const weights = bodyRegions.map(region => region.weight);
+            const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+            let random = Math.random() * totalWeight;
+            
+            let selectedRegion = bodyRegions[0];
+            for (let i = 0; i < bodyRegions.length; i++) {
+                random -= weights[i];
+                if (random <= 0) {
+                    selectedRegion = bodyRegions[i];
+                    break;
+                }
+            }
+            
+            // Generate point within selected region
+            return generatePointInRegion(selectedRegion);
+        }
+        
+        function getExpandedBodyRegions() {
+            if (smoothedLandmarks.length === 0) return [];
+            
+            const lm = smoothedLandmarks;
+            
+            return [
+                {
+                    // Expanded torso region (main body area)
+                    center: { x: (lm[11].x + lm[12].x + lm[23].x + lm[24].x) / 4,
+                             y: (lm[11].y + lm[12].y + lm[23].y + lm[24].y) / 4 },
+                    width: 0.25, height: 0.35, weight: 3 // Larger for full coverage
+                },
+                {
+                    // Expanded head region
+                    center: lm[0],
+                    width: 0.15, height: 0.18, weight: 2 // Larger head area
+                },
+                {
+                    // Expanded left arm
+                    center: { x: (lm[11].x + lm[13].x + lm[15].x) / 3, 
+                             y: (lm[11].y + lm[13].y + lm[15].y) / 3 },
+                    width: 0.12, height: 0.30, weight: 1.5 // Full arm coverage
+                },
+                {
+                    // Expanded right arm  
+                    center: { x: (lm[12].x + lm[14].x + lm[16].x) / 3,
+                             y: (lm[12].y + lm[14].y + lm[16].y) / 3 },
+                    width: 0.12, height: 0.30, weight: 1.5
+                },
+                {
+                    // Expanded left leg
+                    center: { x: (lm[23].x + lm[25].x + lm[27].x) / 3,
+                             y: (lm[23].y + lm[25].y + lm[27].y) / 3 },
+                    width: 0.15, height: 0.35, weight: 1.5 // Full leg coverage
+                },
+                {
+                    // Expanded right leg
+                    center: { x: (lm[24].x + lm[26].x + lm[28].x) / 3,
+                             y: (lm[24].y + lm[26].y + lm[28].y) / 3 },
+                    width: 0.15, height: 0.35, weight: 1.5
+                }
+            ].filter(region => region.center && region.center.x && region.center.y);
+        }
+        
+        function getRandomPointInSilhouette() {
+            // Create body shape using key landmarks for efficient silhouette
+            const bodyRegions = getBodyRegions();
+            
+            // Weighted selection - torso gets most particles
+            const weights = bodyRegions.map(region => region.weight);
+            const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+            let random = Math.random() * totalWeight;
+            
+            let selectedRegion = bodyRegions[0];
+            for (let i = 0; i < bodyRegions.length; i++) {
+                random -= weights[i];
+                if (random <= 0) {
+                    selectedRegion = bodyRegions[i];
+                    break;
+                }
+            }
+            
+            // Generate point within selected region
+            return generatePointInRegion(selectedRegion);
+        }
+        
+        function getBodyRegions() {
+            if (smoothedLandmarks.length === 0) return [];
+            
+            const lm = smoothedLandmarks;
+            
+            return [
+                {
+                    // Torso - largest region
+                    center: { x: (lm[11].x + lm[12].x + lm[23].x + lm[24].x) / 4,
+                             y: (lm[11].y + lm[12].y + lm[23].y + lm[24].y) / 4 },
+                    width: 0.20, height: 0.30, weight: 4
+                },
+                {
+                    // Head
+                    center: lm[0],
+                    width: 0.10, height: 0.12, weight: 2
+                },
+                {
+                    // Left arm
+                    center: { x: (lm[11].x + lm[15].x) / 2, y: (lm[11].y + lm[15].y) / 2 },
+                    width: 0.08, height: 0.25, weight: 1
+                },
+                {
+                    // Right arm  
+                    center: { x: (lm[12].x + lm[16].x) / 2, y: (lm[12].y + lm[16].y) / 2 },
+                    width: 0.08, height: 0.25, weight: 1
+                },
+                {
+                    // Left leg
+                    center: { x: (lm[23].x + lm[27].x) / 2, y: (lm[23].y + lm[27].y) / 2 },
+                    width: 0.10, height: 0.30, weight: 1
+                },
+                {
+                    // Right leg
+                    center: { x: (lm[24].x + lm[28].x) / 2, y: (lm[24].y + lm[28].y) / 2 },
+                    width: 0.10, height: 0.30, weight: 1
+                }
+            ].filter(region => region.center && region.center.x && region.center.y);
+        }
+        
+        function generatePointInRegion(region) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * Math.min(region.width, region.height) / 2;
+            
+            const x = region.center.x + Math.cos(angle) * radius;
+            const y = region.center.y + Math.sin(angle) * radius;
+            
+            return {
+                x: x * canvas.width,
+                y: y * canvas.height
+            };
+        }
+        
+        function getRandomPointNearLandmarks() {
+            // Pick a random body part and spawn particles around it
+            const bodyAreas = [
+                // Torso area (higher weight for more coverage)
+                { landmarks: [11, 12, 23, 24], weight: 4 },
+                // Head area
+                { landmarks: [0, 1, 2, 3, 4, 5], weight: 2 },
+                // Arms
+                { landmarks: [11, 13, 15], weight: 1 },
+                { landmarks: [12, 14, 16], weight: 1 },
+                // Legs
+                { landmarks: [23, 25, 27], weight: 1 },
+                { landmarks: [24, 26, 28], weight: 1 }
+            ];
+            
+            // Weighted random selection
+            const totalWeight = bodyAreas.reduce((sum, area) => sum + area.weight, 0);
+            let random = Math.random() * totalWeight;
+            
+            let selectedArea = bodyAreas[0];
+            for (const area of bodyAreas) {
+                random -= area.weight;
+                if (random <= 0) {
+                    selectedArea = area;
+                    break;
+                }
+            }
+            
+            // Get center of selected body area
+            let centerX = 0, centerY = 0, count = 0;
+            
+            for (const landmarkIndex of selectedArea.landmarks) {
+                const landmark = smoothedLandmarks[landmarkIndex];
+                if (landmark) {
+                    centerX += landmark.x;
+                    centerY += landmark.y;
+                    count++;
+                }
+            }
+            
+            if (count === 0) return null;
+            
+            centerX /= count;
+            centerY /= count;
+            
+            // Add random offset within body area - increased for better coverage
+            const spread = 0.12; // 12% of canvas (was 8%)
+            const x = centerX + (Math.random() - 0.5) * spread;
+            const y = centerY + (Math.random() - 0.5) * spread;
+            
+            return {
+                x: x * canvas.width,
+                y: y * canvas.height
+            };
+        }
+        
+        function getRandomPointInSegmentation() {
+            if (!segmentationMask) return null;
+            
+            // Try to find a point in the segmentation mask
+            for (let attempt = 0; attempt < 50; attempt++) {
+                const x = Math.random();
+                const y = Math.random();
+                
+                // Check if this pixel is in the mask (simplified check)
+                // In real implementation, you'd read the mask pixel data
+                if (Math.random() < 0.3) { // 30% chance to be in mask
+                    return {
+                        x: x * canvas.width,
+                        y: y * canvas.height
+                    };
+                }
+            }
+            
+            return null;
+        }
+        
+        function getRandomPointInSilhouette() {
+            if (smoothedLandmarks.length === 0) {
+                console.log('No landmarks available');
+                return null;
+            }
+            
+            // Create a more accurate body silhouette using key landmarks
+            const bodySegments = getBodySegments();
+            console.log('Body segments created:', bodySegments.length);
+            
+            for (let attempt = 0; attempt < 100; attempt++) {
+                // Randomly choose a body segment
+                const segment = bodySegments[Math.floor(Math.random() * bodySegments.length)];
+                
+                if (!segment || !segment.start || !segment.end) continue;
+                
+                // Generate random point within this segment's bounds
+                const t = Math.random(); // Parameter along the segment
+                const width = (segment.thickness / canvas.width) + Math.random() * 0.05; // Add some variation
+                
+                // Point along the segment with perpendicular offset
+                const centerX = segment.start.x + t * (segment.end.x - segment.start.x);
+                const centerY = segment.start.y + t * (segment.end.y - segment.start.y);
+                
+                // Add perpendicular offset for width
+                const angle = Math.atan2(segment.end.y - segment.start.y, segment.end.x - segment.start.x) + Math.PI/2;
+                const offset = (Math.random() - 0.5) * width;
+                
+                const x = centerX + Math.cos(angle) * offset;
+                const y = centerY + Math.sin(angle) * offset;
+                
+                // Ensure point is within canvas bounds
+                if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+                    return {
+                        x: x * canvas.width,
+                        y: y * canvas.height
+                    };
+                }
+            }
+            
+            // Fallback: spawn at torso center
+            const torsoCenter = getTorsoCenter();
+            console.log('Using fallback torso center');
+            return {
+                x: torsoCenter.x * canvas.width,
+                y: torsoCenter.y * canvas.height
+            };
+        }
+        
+        function getBodySegments() {
+            // Define body segments with their thickness
+            const segments = [
+                // Torso - main body area
+                { start: smoothedLandmarks[11], end: smoothedLandmarks[12], thickness: 50 }, // shoulders
+                { start: smoothedLandmarks[11], end: smoothedLandmarks[23], thickness: 45 }, // left side torso
+                { start: smoothedLandmarks[12], end: smoothedLandmarks[24], thickness: 45 }, // right side torso
+                { start: smoothedLandmarks[23], end: smoothedLandmarks[24], thickness: 40 }, // hips
+                
+                // Left arm
+                { start: smoothedLandmarks[11], end: smoothedLandmarks[13], thickness: 30 }, // upper arm
+                { start: smoothedLandmarks[13], end: smoothedLandmarks[15], thickness: 25 }, // forearm
+                
+                // Right arm
+                { start: smoothedLandmarks[12], end: smoothedLandmarks[14], thickness: 30 }, // upper arm
+                { start: smoothedLandmarks[14], end: smoothedLandmarks[16], thickness: 25 }, // forearm
+                
+                // Left leg
+                { start: smoothedLandmarks[23], end: smoothedLandmarks[25], thickness: 35 }, // thigh
+                { start: smoothedLandmarks[25], end: smoothedLandmarks[27], thickness: 30 }, // calf
+                
+                // Right leg
+                { start: smoothedLandmarks[24], end: smoothedLandmarks[26], thickness: 35 }, // thigh
+                { start: smoothedLandmarks[26], end: smoothedLandmarks[28], thickness: 30 }, // calf
+                
+                // Head area - create multiple segments for better coverage
+                { start: smoothedLandmarks[0], end: smoothedLandmarks[1], thickness: 40 }, // nose to forehead
+                { start: smoothedLandmarks[1], end: smoothedLandmarks[2], thickness: 40 }, // forehead to top
+                { start: smoothedLandmarks[2], end: smoothedLandmarks[3], thickness: 35 }, // top head
+                { start: smoothedLandmarks[0], end: smoothedLandmarks[4], thickness: 40 }, // nose to left cheek
+                { start: smoothedLandmarks[0], end: smoothedLandmarks[5], thickness: 40 }, // nose to right cheek
+            ];
+            
+            const validSegments = segments.filter(seg => seg.start && seg.end);
+            console.log('Valid segments:', validSegments.length, 'out of', segments.length);
+            return validSegments;
+        }
+        
+        function getTorsoCenter() {
+            // Get center point of torso
+            const leftShoulder = smoothedLandmarks[11];
+            const rightShoulder = smoothedLandmarks[12];
+            const leftHip = smoothedLandmarks[23];
+            const rightHip = smoothedLandmarks[24];
+            
+            if (leftShoulder && rightShoulder && leftHip && rightHip) {
+                return {
+                    x: (leftShoulder.x + rightShoulder.x + leftHip.x + rightHip.x) / 4,
+                    y: (leftShoulder.y + rightShoulder.y + leftHip.y + rightHip.y) / 4
+                };
+            }
+            
+            return smoothedLandmarks[0]; // fallback to nose
+        }
+        
+        function isPointNearBody(x, y) {
+            // Check if point is near any body landmark
+            const threshold = 0.15; // 15% of canvas dimensions
+            
+            for (let landmark of smoothedLandmarks) {
+                const distance = Math.sqrt(
+                    Math.pow(x - landmark.x, 2) + Math.pow(y - landmark.y, 2)
+                );
+                if (distance < threshold) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        function getAuraColor(y = null) {
+            // Colors based on reference image: yellows, oranges, with red/purple at top
+            const colors = [
+                '#FFD700', // Gold
+                '#FFA500', // Orange
+                '#FF8C00', // Dark Orange
+                '#FF6347', // Tomato
+                '#FF4500', // Orange Red
+                '#FFB347', // Light Orange
+                '#FFCC00', // Gold Yellow
+            ];
+            
+            // If y position is provided, use height-based coloring
+            if (y !== null && smoothedLandmarks.length > 0) {
+                const headY = smoothedLandmarks[0].y; // nose landmark
+                const bodyHeight = Math.abs(smoothedLandmarks[27].y - headY); // ankle to head
+                const relativeHeight = (y - headY) / bodyHeight;
+                
+                // Top 20% gets reddish/purple hues
+                if (relativeHeight < 0.2) {
+                    const purpleColors = ['#FF1493', '#FF69B4', '#DA70D6', '#BA55D3'];
+                    return purpleColors[Math.floor(Math.random() * purpleColors.length)];
+                }
+            }
+            
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+        
+        function detectMovement() {
+            if (previousLandmarks.length === 0) {
+                previousLandmarks = [...smoothedLandmarks];
+                return { speed: 0, vx: 0, vy: 0, activeJoint: 0 };
+            }
+            
+            let maxSpeed = 0;
+            let maxSpeedJoint = 0;
+            let totalVx = 0;
+            let totalVy = 0;
+            
+            // Check key joints for movement
+            const keyJoints = [15, 16, 27, 28]; // wrists and ankles
+            
+            keyJoints.forEach(joint => {
+                const current = smoothedLandmarks[joint];
+                const previous = previousLandmarks[joint];
+                
+                if (current && previous) {
+                    const dx = (current.x - previous.x) * canvas.width;
+                    const dy = (current.y - previous.y) * canvas.height;
+                    const speed = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (speed > maxSpeed) {
+                        maxSpeed = speed;
+                        maxSpeedJoint = joint;
+                        totalVx = dx;
+                        totalVy = dy;
+                    }
+                }
+            });
+            
+            previousLandmarks = [...smoothedLandmarks];
+            
+            return { speed: maxSpeed, vx: totalVx, vy: totalVy, activeJoint: maxSpeedJoint };
+        }
+        
+        function getParticleColor() {
+            return getAuraColor(); // Use the new aura color system
+        }
+        
+        function detectGestures() {
+            if (!handsResults || !handsResults.multiHandLandmarks) return;
+            
+            // This is a simplified gesture detection
+            // In a real implementation, you'd check finger positions
+            
+            // For demo purposes, we'll just show random gestures occasionally
+            if (Math.random() < 0.01) {
+                const gestures = ['✨ FROZEN', '💥 NOVA BURST!', '🎨 THEME SHIFT'];
+                const gesture = gestures[Math.floor(Math.random() * gestures.length)];
+                showGestureText(gesture);
+            }
+        }
+        
+        function showGestureText(text) {
+            const gestureText = document.getElementById('gestureText');
+            gestureText.textContent = text;
+            gestureText.style.display = 'block';
+            
+            setTimeout(() => {
+                gestureText.style.display = 'none';
+            }, 1500);
+        }
+        
+        // FILTER 2: STICKMAN/SKELETON FILTER
+        function renderStickmanSkeleton() {
+            // Pure black background
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw white skeleton with glow
+            drawWhiteSkeleton();
+        }
+        
+        function drawWhiteSkeleton() {
+            if (smoothedLandmarks.length === 0) return;
+            
+            const lm = smoothedLandmarks;
+            
+            // Set white glow effect
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = 'white';
+            ctx.strokeStyle = 'white';
+            ctx.fillStyle = 'white';
+            
+            // Draw skull circle around head
+            const nose = lm[0];
+            const leftEar = lm[7];
+            const rightEar = lm[8];
+            
+            if (nose && leftEar && rightEar) {
+                const earDistance = Math.sqrt(
+                    Math.pow(leftEar.x - rightEar.x, 2) + 
+                    Math.pow(leftEar.y - rightEar.y, 2)
+                );
+                const skullRadius = earDistance * 0.8 * canvas.width;
+                
+                ctx.lineWidth = 8;
+                ctx.globalAlpha = 0.9;
+                ctx.beginPath();
+                ctx.arc(
+                    nose.x * canvas.width,
+                    nose.y * canvas.height,
+                    skullRadius,
+                    0, Math.PI * 2
+                );
+                ctx.stroke();
+            }
+            
+            // Draw spine (shoulders to pelvis)
+            ctx.lineWidth = 10;
+            drawBone(lm[11], lm[12]); // shoulders
+            drawBone(lm[11], lm[23]); // left shoulder to hip
+            drawBone(lm[12], lm[24]); // right shoulder to hip
+            drawBone(lm[23], lm[24]); // pelvis
+            
+            // Draw ribcage (oval between shoulders and hips)
+            if (lm[11] && lm[12] && lm[23] && lm[24]) {
+                ctx.lineWidth = 8;
+                ctx.globalAlpha = 0.7;
+                ctx.beginPath();
+                ctx.ellipse(
+                    (lm[11].x + lm[12].x + lm[23].x + lm[24].x) / 4 * canvas.width,
+                    (lm[11].y + lm[12].y + lm[23].y + lm[24].y) / 4 * canvas.height,
+                    Math.abs(lm[11].x - lm[12].x) * canvas.width * 0.6,
+                    Math.abs(lm[11].y - lm[23].y) * canvas.height * 0.4,
+                    0, 0, Math.PI * 2
+                );
+                ctx.stroke();
+            }
+            
+            // Draw left arm
+            ctx.lineWidth = 9;
+            drawBone(lm[11], lm[13]); // shoulder to elbow
+            drawBone(lm[13], lm[15]); // elbow to wrist
+            
+            // Draw right arm
+            drawBone(lm[12], lm[14]); // shoulder to elbow
+            drawBone(lm[14], lm[16]); // elbow to wrist
+            
+            // Draw left leg
+            ctx.lineWidth = 10;
+            drawBone(lm[23], lm[25]); // hip to knee
+            drawBone(lm[25], lm[27]); // knee to ankle
+            
+            // Draw right leg
+            drawBone(lm[24], lm[26]); // hip to knee
+            drawBone(lm[26], lm[28]); // knee to ankle
+            
+            // Draw joint circles
+            ctx.globalAlpha = 1.0;
+            const joints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 31, 32];
+            joints.forEach(index => {
+                const joint = lm[index];
+                if (joint) {
+                    ctx.beginPath();
+                    ctx.arc(
+                        joint.x * canvas.width,
+                        joint.y * canvas.height,
+                        7, // Joint radius
+                        0, Math.PI * 2
+                    );
+                    ctx.fill();
+                }
+            });
+            
+            // Reset shadow
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1.0;
+        }
+        
+        function drawBone(start, end) {
+            if (!start || !end) return;
+            
+            ctx.beginPath();
+            ctx.moveTo(start.x * canvas.width, start.y * canvas.height);
+            ctx.lineTo(end.x * canvas.width, end.y * canvas.height);
+            ctx.stroke();
+        }
+        
+        // FILTER 4: PHANTOM ECHO - 3D RIBBON/SMOKE TRAILS
+        const RIBBON_CONFIG = {
+            joints: [
+                { index: 0, color: '#FFFFFF', name: 'nose' },
+                { index: 11, color: '#FF00FF', name: 'leftShoulder' },
+                { index: 12, color: '#00FFFF', name: 'rightShoulder' },
+                { index: 13, color: '#FF6600', name: 'leftElbow' },
+                { index: 14, color: '#39FF14', name: 'rightElbow' },
+                { index: 15, color: '#FFFF00', name: 'leftWrist' },
+                { index: 16, color: '#FF0055', name: 'rightWrist' },
+                { index: 23, color: '#BF00FF', name: 'leftHip' },
+                { index: 24, color: '#00FF88', name: 'rightHip' },
+                { index: 25, color: '#FF3399', name: 'leftKnee' },
+                { index: 26, color: '#00BFFF', name: 'rightKnee' },
+                { index: 27, color: '#CCFF00', name: 'leftAnkle' },
+                { index: 28, color: '#FF4500', name: 'rightAnkle' }
+            ],
+            maxTrailPoints: 100,
+            maxAge: 90,
+            baseWidth: 14,
+            fadeAmount: 0.15,
+            smokeParticles: 3
+        };
+        
+        let ribbonTrails = {};
+        let smokeParticles = [];
+        let offscreenCanvas, offscreenCtx;
+        let shimmerCounter = 0;
+        
+        function renderPhantomEcho() {
+            // Initialize offscreen canvas if needed
+            if (!offscreenCanvas) {
+                offscreenCanvas = document.createElement('canvas');
+                offscreenCanvas.width = canvas.width;
+                offscreenCanvas.height = canvas.height;
+                offscreenCtx = offscreenCanvas.getContext('2d');
+                
+                // Initialize trails for each joint
+                RIBBON_CONFIG.joints.forEach(joint => {
+                    ribbonTrails[joint.name] = [];
+                });
+            }
+            
+            // Fade canvas for motion blur effect
+            ctx.fillStyle = 'rgba(0, 0, 0, ' + RIBBON_CONFIG.fadeAmount + ')';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw faint video feed
+            if (video.readyState === 4) {
+                ctx.globalAlpha = 0.1;
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+                ctx.restore();
+                ctx.globalAlpha = 1.0;
+            }
+            
+            // Update trails
+            updateRibbonTrails();
+            
+            // Render to offscreen canvas first
+            offscreenCtx.fillStyle = 'rgba(0, 0, 0, 0)';
+            offscreenCtx.fillRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+            
+            // Draw all ribbons
+            RIBBON_CONFIG.joints.forEach(joint => {
+                drawRibbon(ribbonTrails[joint.name], joint.color);
+            });
+            
+            // Draw smoke particles
+            drawSmokeParticles();
+            
+            // Composite onto main canvas
+            ctx.drawImage(offscreenCanvas, 0, 0);
+        }
+        
+        function updateRibbonTrails() {
+            shimmerCounter++;
+            
+            RIBBON_CONFIG.joints.forEach(joint => {
+                const landmark = smoothedLandmarks[joint.index];
+                if (!landmark || landmark.visibility < 0.4) return;
+                
+                const trail = ribbonTrails[joint.name];
+                
+                // Add new point
+                const newPoint = {
+                    x: landmark.x * canvas.width,
+                    y: landmark.y * canvas.height,
+                    age: 0,
+                    width: RIBBON_CONFIG.baseWidth,
+                    shimmer: shimmerCounter % 5 === 0
+                };
+                
+                trail.push(newPoint);
+                
+                // Remove old points
+                if (trail.length > RIBBON_CONFIG.maxTrailPoints) {
+                    trail.shift();
+                }
+                
+                // Age existing points
+                trail.forEach(point => {
+                    point.age++;
+                    point.width = RIBBON_CONFIG.baseWidth * (1 - point.age / RIBBON_CONFIG.maxAge);
+                    
+                    // Create smoke particles occasionally
+                    if (Math.random() < 0.1 && smokeParticles.length < 200) {
+                        for (let i = 0; i < RIBBON_CONFIG.smokeParticles; i++) {
+                            smokeParticles.push({
+                                x: point.x + (Math.random() - 0.5) * 10,
+                                y: point.y + (Math.random() - 0.5) * 10,
+                                vx: (Math.random() - 0.5) * 2,
+                                vy: (Math.random() - 0.5) * 2,
+                                age: 0,
+                                color: joint.color,
+                                size: 3 + Math.random() * 4
+                            });
+                        }
+                    }
+                });
+            });
+            
+            // Update smoke particles
+            smokeParticles = smokeParticles.filter(particle => {
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.vx *= 0.98;
+                particle.vy *= 0.98;
+                particle.age++;
+                return particle.age < 60;
+            });
+        }
+        
+        function drawRibbon(trail, color) {
+            if (trail.length < 2) return;
+            
+            offscreenCtx.shadowBlur = 20;
+            offscreenCtx.shadowColor = color;
+            
+            for (let i = 1; i < trail.length; i++) {
+                const p1 = trail[i - 1];
+                const p2 = trail[i];
+                
+                const alpha = 1 - (p2.age / RIBBON_CONFIG.maxAge);
+                const width = p2.width * (p2.shimmer ? 1.3 : 1.0);
+                
+                // Calculate perpendicular normal
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                
+                if (length === 0) continue;
+                
+                const normalX = -dy / length * width;
+                const normalY = dx / length * width;
+                
+                // Add 3D depth effect
+                const depth = Math.sin(Date.now() * 0.001 + i * 0.1) * 0.2;
+                const adjustedAlpha = alpha * (1 + depth);
+                
+                offscreenCtx.fillStyle = color;
+                offscreenCtx.globalAlpha = adjustedAlpha;
+                
+                // Draw ribbon segment as quadrilateral
+                offscreenCtx.beginPath();
+                offscreenCtx.moveTo(p1.x + normalX, p1.y + normalY);
+                offscreenCtx.lineTo(p2.x + normalX, p2.y + normalY);
+                offscreenCtx.lineTo(p2.x - normalX, p2.y - normalY);
+                offscreenCtx.lineTo(p1.x - normalX, p1.y - normalY);
+                offscreenCtx.closePath();
+                offscreenCtx.fill();
+            }
+            
+            offscreenCtx.shadowBlur = 0;
+            offscreenCtx.globalAlpha = 1.0;
+        }
+        
+        function drawSmokeParticles() {
+            smokeParticles.forEach(particle => {
+                const alpha = (1 - particle.age / 60) * 0.3;
+                
+                offscreenCtx.fillStyle = particle.color;
+                offscreenCtx.globalAlpha = alpha;
+                offscreenCtx.shadowBlur = 15;
+                offscreenCtx.shadowColor = particle.color;
+                
+                offscreenCtx.beginPath();
+                offscreenCtx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                offscreenCtx.fill();
+            });
+            
+            offscreenCtx.shadowBlur = 0;
+            offscreenCtx.globalAlpha = 1.0;
+        }
+        
+        function drawPhantomSkeleton(landmarks, opacity, hueShift, lineWidth) {
+            ctx.globalAlpha = opacity;
+            
+            // Convert hue shift to color
+            const hue = (180 + hueShift) % 360;
+            const color = `hsl(${hue}, 100%, 50%)`;
+            
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            
+            // Draw connections
+            bodyConnections.forEach(([start, end]) => {
+                const startPoint = landmarks[start];
+                const endPoint = landmarks[end];
+                
+                if (!startPoint || !endPoint) return;
+                
+                const x1 = startPoint.x * canvas.width;
+                const y1 = startPoint.y * canvas.height;
+                const x2 = endPoint.x * canvas.width;
+                const y2 = endPoint.y * canvas.height;
+                
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            });
+            
+            ctx.globalAlpha = 1.0;
+        }
+        
+        // FILTER 5: SILK STREAM - HOLOGRAPHIC RIBBON TRAILS (MOVEMENT-BASED)
+        const HOLOGRAPHIC_CONFIG = {
+            maxTrailPoints: 1000, // Very high limit - only clear when hand stops
+            baseWidth: 28,
+            fadeAmount: 1.0, // Full clear - no persistence
+            colors: ['#a78bfa', '#60a5fa', '#34d399', '#f472b6', '#67e8f9'],
+            leftBaseHue: 280,
+            rightBaseHue: 200,
+            landmarkIndex: 9,
+            maxJumpDistance: 150, // Increased - don't clear on normal fast movements
+            minMovementDistance: 1, // Very sensitive - detect tiny movements
+            stopThreshold: 30, // Increased - clear trail only after 30 frames (0.5s) of no movement
+            maxAge: 10000 // Very high - only clear on stop, not time
+        };
+        
+        let holographicTrails = {
+            left: [],
+            right: []
+        };
+        let holographicFrameCount = 0;
+        let lastHandPositions = {
+            left: { x: 0, y: 0 },
+            right: { x: 0, y: 0 }
+        };
+        let framesWithoutMovement = {
+            left: 0,
+            right: 0
+        };
+        
+        function processHandData(landmarks, handedness) {
+            const now = Date.now();
+            
+            landmarks.forEach((handLandmarks, index) => {
+                const hand = handedness[index];
+                if (!hand || hand.score < 0.8) return;
+                
+                const handLabel = hand.label;
+                const trailKey = handLabel.toLowerCase();
+                
+                const landmark = handLandmarks[HOLOGRAPHIC_CONFIG.landmarkIndex];
+                if (!landmark) return;
+                
+                // Direct position - NO LERP/SMOOTHING for real-time
+                const rawX = (1 - landmark.x) * canvas.width;
+                const rawY = landmark.y * canvas.height;
+                
+                // Check for fast movement - clear trail on jumps
+                const lastPos = lastHandPositions[trailKey];
+                let moved = false;
+                
+                if (lastPos.x !== 0 || lastPos.y !== 0) {
+                    const jump = Math.hypot(rawX - lastPos.x, rawY - lastPos.y);
+                    if (jump > HOLOGRAPHIC_CONFIG.maxJumpDistance) {
+                        holographicTrails[trailKey].length = 0;
+                        console.log(`Cleared ${handLabel} trail due to fast movement: ${jump.toFixed(1)}px`);
+                    }
+                    
+                    // Check if hand actually moved - more sensitive detection
+                    if (jump >= HOLOGRAPHIC_CONFIG.minMovementDistance) {
+                        moved = true;
+                        framesWithoutMovement[trailKey] = 0; // Reset movement counter
+                    }
+                } else {
+                    // First detection - count as movement
+                    moved = true;
+                    framesWithoutMovement[trailKey] = 0;
+                }
+                
+                lastHandPositions[trailKey] = { x: rawX, y: rawY };
+                
+                // Only add point if hand actually moved
+                if (!moved) {
+                    framesWithoutMovement[trailKey]++;
+                    
+                    // Clear trail only if hand stopped for threshold frames (increased tolerance)
+                    if (framesWithoutMovement[trailKey] > HOLOGRAPHIC_CONFIG.stopThreshold) {
+                        holographicTrails[trailKey].length = 0;
+                        console.log(`Cleared ${handLabel} trail - hand stopped moving for ${framesWithoutMovement[trailKey]} frames`);
+                    }
+                    return;
+                }
+                
+                // Add new point with timestamp
+                holographicTrails[trailKey].push({
+                    x: rawX,
+                    y: rawY,
+                    time: now,
+                    age: 0
+                });
+                
+                // Remove old points - only if exceeding max limit (very high)
+                if (holographicTrails[trailKey].length > HOLOGRAPHIC_CONFIG.maxTrailPoints) {
+                    holographicTrails[trailKey].shift();
+                }
+                
+                // Don't remove based on age - only clear when hand stops
+                console.log(`Added ${handLabel} trail point - movement detected`);
+            });
+        }
+        
+        function updateHandLoss() {
+            // Only clear if no hands detected at all
+            // Don't clear based on time - only when hand stops moving
+            Object.keys(holographicTrails).forEach(hand => {
+                framesWithoutMovement[hand]++;
+                
+                // Clear trail only if no hand detected for many frames
+                if (framesWithoutMovement[hand] > 30) { // 0.5 seconds without any detection
+                    holographicTrails[hand].length = 0;
+                    console.log(`Cleared ${hand} trail - no hand detected`);
+                }
+            });
+        }
+        
+        function renderSilkStream() {
+            holographicFrameCount++;
+            
+            // FADE instead of full clear for painting effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.02)'; // Very slow fade for painting
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw very faint video feed
+            if (video.readyState === 4) {
+                ctx.globalAlpha = 0.05;
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+                ctx.restore();
+                ctx.globalAlpha = 1.0;
+            }
+            
+            // Update hand loss
+            updateHandLoss();
+            
+            // Draw holographic ribbons with painting effect
+            drawHolographicRibbon(holographicTrails.left, HOLOGRAPHIC_CONFIG.leftBaseHue);
+            drawHolographicRibbon(holographicTrails.right, HOLOGRAPHIC_CONFIG.rightBaseHue);
+        }
+        
+        function drawHolographicRibbon(trail, baseHue) {
+            if (trail.length < 2) return;
+            
+            // Set holographic glow
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = '#a78bfa';
+            
+            // Draw from OLDEST to NEWEST (tail to head)
+            for (let i = 1; i < trail.length; i++) {
+                const p1 = trail[i - 1]; // Older point (tail)
+                const p2 = trail[i];     // Newer point (head direction)
+                
+                // Calculate opacity based on position in trail
+                // More gradual fade for painting effect
+                const opacity = 0.3 + (i / trail.length) * 0.7; // Range: 30% to 100%
+                
+                // Calculate width - NEWEST points have FULL width
+                const width = HOLOGRAPHIC_CONFIG.baseWidth * (i / trail.length);
+                
+                // Calculate holographic color
+                const hue = (baseHue + i * 3 + holographicFrameCount * 0.5) % 360;
+                const color = `hsl(${hue}, 100%, 75%)`;
+                
+                // Calculate perpendicular normal for ribbon width
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                
+                if (length === 0) continue;
+                
+                const normalX = -dy / length * (width / 2);
+                const normalY = dx / length * (width / 2);
+                
+                // Draw main ribbon body with gradient
+                ctx.globalAlpha = opacity;
+                
+                // Create gradient for this segment
+                const gradient = ctx.createLinearGradient(
+                    p1.x - normalX, p1.y - normalY,
+                    p1.x + normalX, p1.y + normalY
+                );
+                
+                // Holographic gradient colors
+                gradient.addColorStop(0, color);
+                gradient.addColorStop(0.5, `hsl(${(hue + 30) % 360}, 100%, 85%)`);
+                gradient.addColorStop(1, `hsl(${(hue - 30) % 360}, 100%, 65%)`);
+                
+                ctx.fillStyle = gradient;
+                
+                // Draw ribbon segment as quadrilateral
+                ctx.beginPath();
+                ctx.moveTo(p1.x + normalX, p1.y + normalY);
+                ctx.lineTo(p2.x + normalX, p2.y + normalY);
+                ctx.lineTo(p2.x - normalX, p2.y - normalY);
+                ctx.lineTo(p1.x - normalX, p1.y - normalY);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Draw highlight streak along upper edge (brighter on newest)
+                if (i === trail.length - 1) { // Only on newest segment
+                    ctx.globalAlpha = opacity * 0.6;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x + normalX * 0.7, p1.y + normalY * 0.7);
+                    ctx.lineTo(p2.x + normalX * 0.7, p2.y + normalY * 0.7);
+                    ctx.stroke();
+                }
+                
+                // Draw shadow streak along lower edge
+                ctx.globalAlpha = opacity * 0.3;
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(p1.x - normalX * 0.8, p1.y - normalY * 0.8);
+                ctx.lineTo(p2.x - normalX * 0.8, p2.y - normalY * 0.8);
+                ctx.stroke();
+            }
+            
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1.0;
+        }
+        
+        function catmullRomSpline(points) {
+            if (points.length < 3) return points;
+            
+            const smoothed = [];
+            const tension = 0.3;
+            
+            for (let i = 0; i < points.length - 1; i++) {
+                const p0 = points[Math.max(0, i - 1)];
+                const p1 = points[i];
+                const p2 = points[Math.min(points.length - 1, i + 1)];
+                const p3 = points[Math.min(points.length - 1, i + 2)];
+                
+                // Add original point
+                smoothed.push(p1);
+                
+                // Add interpolated points for smoothness
+                for (let t = 0.25; t < 1; t += 0.25) {
+                    const t2 = t * t;
+                    const t3 = t2 * t;
+                    
+                    const x = 0.5 * (
+                        (2 * p1.x) +
+                        (-p0.x + p2.x) * t +
+                        (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+                        (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
+                    );
+                    
+                    const y = 0.5 * (
+                        (2 * p1.y) +
+                        (-p0.y + p2.y) * t +
+                        (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+                        (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
+                    );
+                    
+                    smoothed.push({ x, y, age: p1.age });
+                }
+            }
+            
+            // Add last point
+            smoothed.push(points[points.length - 1]);
+            
+            return smoothed;
+        }
+        
+        // FILTER 6: SHADOW BOXING INK EXPLOSION (OPTIMIZED)
+        const INK_CONFIG = {
+            PUNCH_THRESHOLD: 20, // px per frame
+            RESET_SPEED: 8, // px per frame to reset punch state
+            COOLDOWN: 200, // ms between explosions
+            MAX_PARTICLES: 400, // Reduced from 800 for performance
+            SCREEN_SHAKE_INTENSITY: 8, // Reduced from 12
+            SCREEN_SHAKE_DURATION: 200, // Reduced from 300
+            FLASH_THRESHOLD: 0.8 // Increased to reduce flashes
+        };
+        
+        const INK_PALETTES = {
+            cool: [
+                { main: '#00FFFF', dark: '#006666', light: '#99FFFF' }, // cyan ink
+                { main: '#BF00FF', dark: '#4B0082', light: '#DD88FF' }, // purple
+                { main: '#0080FF', dark: '#003366', light: '#66B3FF' }, // blue
+            ],
+            warm: [
+                { main: '#FF0055', dark: '#8B0000', light: '#FF6688' }, // blood red
+                { main: '#FF6600', dark: '#7A2D00', light: '#FFAA55' }, // orange
+                { main: '#FFFF00', dark: '#666600', light: '#FFFF99' }, // yellow
+                { main: '#FF00FF', dark: '#660066', light: '#FF88FF' }, // magenta
+            ]
+        };
+        
+        // Multi-layer canvas system
+        let inkCanvas, inkCtx; // Layer 1: permanent ink
+        let particleCanvas, particleCtx; // Layer 2: flying particles
+        let videoCanvas, videoCtx; // Layer 3: camera feed
+        
+        // Particle systems
+        let inkParticles = [];
+        let splatBlobs = [];
+        let inkDrips = [];
+        let mistParticles = [];
+        let impactRings = [];
+        
+        // Punch tracking
+        let previousHandPositions = { left: null, right: null };
+        let isPunching = { left: false, right: false };
+        let lastExplosionTime = { left: 0, right: 0 };
+        let punchCount = { left: 0, right: 0 };
+        
+        // UI elements
+        let punchSpeedDisplay = { left: 0, right: 0 };
+        
+        function renderInkFury() {
+            // Safety check for canvas contexts
+            if (!particleCtx || !videoCtx || !inkCtx) {
+                console.error('Canvas contexts not initialized - reinitializing...');
+                initializeInkCanvases();
+            }
+            
+            // Clear particle canvas every frame
+            particleCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+            
+            // Draw video layer (bottom)
+            videoCtx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            videoCtx.fillRect(0, 0, videoCanvas.width, videoCanvas.height);
+            if (video.readyState === 4) {
+                videoCtx.globalAlpha = 0.15;
+                videoCtx.save();
+                videoCtx.scale(-1, 1);
+                videoCtx.drawImage(video, -videoCanvas.width, 0, videoCanvas.width, videoCanvas.height);
+                videoCtx.restore();
+                videoCtx.globalAlpha = 1.0;
+            }
+            
+            // Detect punches
+            detectInkPunches();
+            
+            // Update all particle systems
+            updateInkParticles();
+            updateSplatBlobs();
+            updateInkDrips();
+            updateMistParticles();
+            updateImpactRings();
+            
+            // Draw all layers
+            ctx.drawImage(videoCanvas, 0, 0); // Bottom layer
+            ctx.drawImage(inkCanvas, 0, 0); // Middle layer (permanent ink)
+            ctx.drawImage(particleCanvas, 0, 0); // Top layer (flying particles)
+            
+            // Update UI
+            updateInkUI();
+        }
+        
+        function detectInkPunches() {
+            if (!handsResults || !handsResults.multiHandLandmarks || !handsResults.multiHandedness) return;
+            
+            const currentTime = Date.now();
+            
+            handsResults.multiHandedness.forEach((hand, index) => {
+                if (hand.score < 0.75) return;
+                
+                const landmarks = handsResults.multiHandLandmarks[index];
+                const wrist = landmarks[0]; // Wrist landmark
+                const handLabel = hand.label; // "Left" or "Right"
+                const side = handLabel.toLowerCase();
+                
+                const currentX = (1 - wrist.x) * canvas.width;
+                const currentY = wrist.y * canvas.height;
+                
+                // Calculate velocity
+                let velocityX = 0, velocityY = 0, speed = 0;
+                
+                if (previousHandPositions[side]) {
+                    velocityX = currentX - previousHandPositions[side].x;
+                    velocityY = currentY - previousHandPositions[side].y;
+                    speed = Math.hypot(velocityX, velocityY);
+                }
+                
+                // Update speed display
+                punchSpeedDisplay[side] = speed;
+                
+                // Punch detection
+                if (speed > INK_CONFIG.PUNCH_THRESHOLD && !isPunching[side]) {
+                    if (currentTime - lastExplosionTime[side] > INK_CONFIG.COOLDOWN) {
+                        triggerInkExplosion(currentX, currentY, velocityX, velocityY, speed, side);
+                        isPunching[side] = true;
+                        lastExplosionTime[side] = currentTime;
+                        punchCount[side]++;
+                    }
+                }
+                
+                // Reset punch state
+                if (speed < INK_CONFIG.RESET_SPEED) {
+                    isPunching[side] = false;
+                }
+                
+                previousHandPositions[side] = { x: currentX, y: currentY };
+            });
+        }
+        
+        function triggerInkExplosion(x, y, velocityX, velocityY, speed, side) {
+            const power = Math.min(speed / 60, 1.0);
+            const direction = {
+                x: velocityX / speed,
+                y: velocityY / speed
+            };
+            
+            // Select color palette based on hand
+            const palettes = side === 'left' ? INK_PALETTES.cool : INK_PALETTES.warm;
+            const palette = palettes[Math.floor(Math.random() * palettes.length)];
+            
+            // Screen shake
+            if (power > 0.3) {
+                triggerScreenShake(power);
+            }
+            
+            // Flash effect for hard punches
+            if (power > INK_CONFIG.FLASH_THRESHOLD) {
+                triggerFlash();
+            }
+            
+            // Impact ring
+            createImpactRing(x, y, power);
+            
+            // Create all 4 particle types
+            createPrimaryInkSpray(x, y, direction, power, palette);
+            createSplatBlobs(x, y, power, palette);
+            createInkDrips(x, y, palette);
+            createFineMist(x, y, palette);
+            
+            console.log(`Ink explosion: ${side} hand, power: ${power.toFixed(2)}, speed: ${speed.toFixed(1)}px/frame`);
+        }
+        
+        function createPrimaryInkSpray(x, y, direction, power, palette) {
+            const count = Math.floor(20 + power * 20); // Reduced from 40+40
+            
+            for (let i = 0; i < count; i++) {
+                const spread = (Math.random() - 0.5) * Math.PI * 0.5; // ±45 degrees
+                const angle = Math.atan2(direction.y, direction.x) + spread;
+                const spd = (6 + Math.random() * 12) * power; // Reduced speed
+                
+                const particle = {
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * spd,
+                    vy: Math.sin(angle) * spd,
+                    size: 3 + Math.random() * 8, // Reduced size
+                    color: palette.main,
+                    gravity: 0.3 + Math.random() * 0.2,
+                    drag: 0.92 + Math.random() * 0.03,
+                    life: 1.0,
+                    decay: 0.025 + Math.random() * 0.01, // Faster decay
+                    trail: []
+                };
+                
+                inkParticles.push(particle);
+            }
+        }
+        
+        function createSplatBlobs(x, y, power, palette) {
+            const count = Math.floor(5 + power * 5);
+            
+            for (let i = 0; i < count; i++) {
+                const blob = {
+                    x: x + (Math.random() - 0.5) * 20,
+                    y: y + (Math.random() - 0.5) * 20,
+                    targetRadius: (30 + Math.random() * 50) * power,
+                    currentRadius: 0,
+                    color: palette.main,
+                    life: 1.0,
+                    decay: 0.002, // Very slow fade
+                    points: generateSplatPoints()
+                };
+                
+                splatBlobs.push(blob);
+            }
+        }
+        
+        function generateSplatPoints() {
+            const points = [];
+            const numPoints = 8 + Math.floor(Math.random() * 6);
+            
+            for (let i = 0; i < numPoints; i++) {
+                const angle = (i / numPoints) * Math.PI * 2;
+                const radius = 0.7 + Math.random() * 0.6;
+                points.push({ angle, radius });
+            }
+            
+            return points;
+        }
+        
+        function createInkDrips(x, y, palette) {
+            const count = Math.floor(8 + Math.random() * 7);
+            
+            for (let i = 0; i < count; i++) {
+                const drip = {
+                    x: x + (Math.random() - 0.5) * 40,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 1.5,
+                    vy: 2 + Math.random() * 3,
+                    length: 10,
+                    width: 2 + Math.random() * 4,
+                    color: palette.dark,
+                    life: 1.0,
+                    decay: 0.008
+                };
+                
+                inkDrips.push(drip);
+            }
+        }
+        
+        function createFineMist(x, y, palette) {
+            const count = Math.floor(30 + Math.random() * 20); // Reduced from 60+40
+            
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const spd = 2 + Math.random() * 6; // Reduced speed
+                
+                const mist = {
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * spd,
+                    vy: Math.sin(angle) * spd,
+                    size: 1 + Math.random() * 1.5, // Reduced size
+                    color: palette.main,
+                    life: 0.4 + Math.random() * 0.3, // Shorter life
+                    decay: 0.06 // Faster decay
+                };
+                
+                mistParticles.push(mist);
+            }
+        }
+        
+        function createImpactRing(x, y, power) {
+            impactRings.push({
+                x: x,
+                y: y,
+                radius: 10,
+                maxRadius: 60 + power * 80,
+                life: 1.0,
+                decay: 0.05
+            });
+        }
+        
+        function updateInkParticles() {
+            for (let i = inkParticles.length - 1; i >= 0; i--) {
+                const p = inkParticles[i];
+                
+                // Update position
+                p.x += p.vx;
+                p.y += p.vy;
+                
+                // Apply physics
+                p.vy += p.gravity;
+                p.vx *= p.drag;
+                p.vy *= p.drag;
+                
+                // Update trail
+                p.trail.push({ x: p.x, y: p.y });
+                if (p.trail.length > 5) p.trail.shift();
+                
+                // Update life
+                p.life -= p.decay;
+                
+                // Draw
+                if (p.life > 0.02) {
+                    particleCtx.globalAlpha = p.life;
+                    particleCtx.fillStyle = p.color;
+                    
+                    // Draw trail
+                    p.trail.forEach((point, index) => {
+                        const trailSize = p.size * (index / p.trail.length) * 0.5;
+                        particleCtx.beginPath();
+                        particleCtx.arc(point.x, point.y, trailSize, 0, Math.PI * 2);
+                        particleCtx.fill();
+                    });
+                    
+                    // Draw main particle
+                    particleCtx.beginPath();
+                    particleCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    particleCtx.fill();
+                } else {
+                    inkParticles.splice(i, 1);
+                }
+            }
+            particleCtx.globalAlpha = 1.0;
+        }
+        
+        function updateSplatBlobs() {
+            for (let i = splatBlobs.length - 1; i >= 0; i--) {
+                const blob = splatBlobs[i];
+                
+                // Expand animation
+                if (blob.currentRadius < blob.targetRadius) {
+                    blob.currentRadius += (blob.targetRadius - blob.currentRadius) * 0.2;
+                }
+                
+                // Update life
+                blob.life -= blob.decay;
+                
+                // Draw on permanent ink canvas
+                if (blob.life > 0.01) {
+                    inkCtx.globalAlpha = blob.life;
+                    inkCtx.fillStyle = blob.color;
+                    
+                    inkCtx.beginPath();
+                    blob.points.forEach((point, index) => {
+                        const r = blob.currentRadius * point.radius;
+                        const px = blob.x + Math.cos(point.angle) * r;
+                        const py = blob.y + Math.sin(point.angle) * r;
+                        
+                        if (index === 0) {
+                            inkCtx.moveTo(px, py);
+                        } else {
+                            inkCtx.lineTo(px, py);
+                        }
+                    });
+                    inkCtx.closePath();
+                    inkCtx.fill();
+                } else {
+                    splatBlobs.splice(i, 1);
+                }
+            }
+            inkCtx.globalAlpha = 1.0;
+        }
+        
+        function updateInkDrips() {
+            for (let i = inkDrips.length - 1; i >= 0; i--) {
+                const drip = inkDrips[i];
+                
+                // Update position
+                drip.x += drip.vx;
+                drip.y += drip.vy;
+                
+                // Apply physics
+                drip.vy *= 0.98; // Slow down
+                drip.vx *= 0.95;
+                
+                // Stretch as it falls
+                drip.length += drip.vy * 0.8;
+                
+                // Update life
+                drip.life -= drip.decay;
+                
+                // Draw on permanent ink canvas
+                if (drip.life > 0.01) {
+                    inkCtx.globalAlpha = drip.life;
+                    inkCtx.fillStyle = drip.color;
+                    
+                    // Draw as rounded rectangle
+                    inkCtx.beginPath();
+                    inkCtx.roundRect(drip.x - drip.width/2, drip.y, drip.width, drip.length, drip.width/2);
+                    inkCtx.fill();
+                } else {
+                    inkDrips.splice(i, 1);
+                }
+            }
+            inkCtx.globalAlpha = 1.0;
+        }
+        
+        function updateMistParticles() {
+            for (let i = mistParticles.length - 1; i >= 0; i--) {
+                const mist = mistParticles[i];
+                
+                // Update position
+                mist.x += mist.vx;
+                mist.y += mist.vy;
+                
+                // Update life
+                mist.life -= mist.decay;
+                
+                // Draw
+                if (mist.life > 0.02) {
+                    particleCtx.globalAlpha = mist.life * 0.7;
+                    particleCtx.fillStyle = mist.color;
+                    particleCtx.beginPath();
+                    particleCtx.arc(mist.x, mist.y, mist.size, 0, Math.PI * 2);
+                    particleCtx.fill();
+                } else {
+                    mistParticles.splice(i, 1);
+                }
+            }
+            particleCtx.globalAlpha = 1.0;
+        }
+        
+        function updateImpactRings() {
+            for (let i = impactRings.length - 1; i >= 0; i--) {
+                const ring = impactRings[i];
+                
+                // Expand
+                ring.radius += (ring.maxRadius - ring.radius) * 0.2;
+                
+                // Update life
+                ring.life -= ring.decay;
+                
+                // Draw
+                if (ring.life > 0.01) {
+                    particleCtx.globalAlpha = ring.life;
+                    particleCtx.strokeStyle = '#ffffff';
+                    particleCtx.lineWidth = 3 * ring.life;
+                    particleCtx.beginPath();
+                    particleCtx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
+                    particleCtx.stroke();
+                } else {
+                    impactRings.splice(i, 1);
+                }
+            }
+            particleCtx.globalAlpha = 1.0;
+        }
+        
+        function triggerScreenShake(power) {
+            const intensity = power * INK_CONFIG.SCREEN_SHAKE_INTENSITY;
+            const duration = INK_CONFIG.SCREEN_SHAKE_DURATION;
+            const startTime = Date.now();
+            const container = document.body;
+            
+            function shake() {
+                const elapsed = Date.now() - startTime;
+                if (elapsed > duration) {
+                    container.style.transform = 'translate(0,0)';
+                    return;
+                }
+                const progress = elapsed / duration;
+                const decay = 1 - progress;
+                const dx = (Math.random() - 0.5) * intensity * decay;
+                const dy = (Math.random() - 0.5) * intensity * decay;
+                container.style.transform = `translate(${dx}px, ${dy}px)`;
+                requestAnimationFrame(shake);
+            }
+            shake();
+        }
+        
+        function triggerFlash() {
+            const flashOverlay = document.createElement('div');
+            flashOverlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: white;
+                opacity: 0.4;
+                z-index: 9999;
+                pointer-events: none;
+            `;
+            document.body.appendChild(flashOverlay);
+            
+            setTimeout(() => {
+                flashOverlay.style.opacity = '0';
+                setTimeout(() => document.body.removeChild(flashOverlay), 50);
+            }, 50);
+        }
+        
+        function updateInkUI() {
+            // Update punch counters and speed meters (UI elements would be added separately)
+            // This would update DOM elements showing punch count and current speed
+        }
+        
+        function resetInkCanvas() {
+            inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+            inkParticles = [];
+            splatBlobs = [];
+            inkDrips = [];
+            mistParticles = [];
+            impactRings = [];
+            punchCount = { left: 0, right: 0 };
+        }
+        
+        // Initialize canvases for ink filter
+        function initializeInkCanvases() {
+            // Create layered canvases
+            inkCanvas = document.createElement('canvas');
+            inkCanvas.width = canvas.width;
+            inkCanvas.height = canvas.height;
+            inkCtx = inkCanvas.getContext('2d');
+            
+            particleCanvas = document.createElement('canvas');
+            particleCanvas.width = canvas.width;
+            particleCanvas.height = canvas.height;
+            particleCtx = particleCanvas.getContext('2d');
+            
+            videoCanvas = document.createElement('canvas');
+            videoCanvas.width = canvas.width;
+            videoCanvas.height = canvas.height;
+            videoCtx = videoCanvas.getContext('2d');
+        }
+        
+        // Call initialization when main canvas is ready
+        if (canvas) {
+            initializeInkCanvases();
+        }
+        
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+        
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorOverlay').style.display = 'flex';
+        }
+        
+        function retryCamera() {
+            document.getElementById('errorOverlay').style.display = 'none';
+            toggleCamera();
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
