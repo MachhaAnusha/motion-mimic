@@ -176,7 +176,38 @@
             transform: translateX(-50%);
             z-index: 1000;
             display: flex;
-            gap: 10px;
+            gap: 15px;
+            align-items: center;
+            background: rgba(17, 17, 17, 0.9);
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        
+        .confidence-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #fff;
+            font-size: 12px;
+        }
+        
+        .confidence-control input[type="range"] {
+            width: 100px;
+        }
+        
+        .status-display {
+            display: flex;
+            gap: 15px;
+            color: #fff;
+            font-size: 12px;
+        }
+        
+        .status-display span {
+            background: rgba(0, 255, 0, 0.2);
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #00ff00;
         }
 
         .main-canvas {
@@ -337,10 +368,23 @@
             <span class="shortcut">5</span>
         </button>
         
-        <button class="camera-toggle off" id="cameraToggle">
-            📷 Camera OFF
-        </button>
-        
+        <div class="top-controls">
+            <button class="camera-toggle off" id="cameraToggle">
+                📷 Camera OFF
+            </button>
+            <button class="camera-toggle off" id="webcamToggle">
+                📹 Webcam Feed
+            </button>
+            <div class="confidence-control">
+                <label for="confidenceSlider">Confidence:</label>
+                <input type="range" id="confidenceSlider" min="0.3" max="0.9" step="0.1" value="0.5">
+                <span id="confidenceValue">0.5</span>
+            </div>
+            <div class="status-display">
+                <span id="fpsDisplay">FPS: 0</span>
+                <span id="detectionStatus">Lost</span>
+            </div>
+        </div>
         <button class="clear-btn" id="clearBtn">
             🗑 CLEAR (X)
         </button>
@@ -411,6 +455,11 @@
         let previousLandmarks = [];
         let poseHistory = [];
         let lastPoseTime = Date.now();
+        let showWebcamFeed = true;
+        let confidenceThreshold = 0.5;
+        let detectionStatus = 'Lost';
+        const smoothingAlpha = 0.3;
+        let leftPanel, rightPanel;
         
         // Filter-specific data
         let motionTrail = [];
@@ -577,6 +626,15 @@
             
             // Camera toggle
             document.getElementById('cameraToggle').addEventListener('click', toggleCamera);
+            
+            // Webcam feed toggle
+            document.getElementById('webcamToggle').addEventListener('click', toggleWebcamFeed);
+            
+            // Confidence slider
+            document.getElementById('confidenceSlider').addEventListener('input', function(e) {
+                confidenceThreshold = parseFloat(e.target.value);
+                document.getElementById('confidenceValue').textContent = confidenceThreshold.toFixed(1);
+            });
             
             // Clear button (for Ink Fury)
             document.getElementById('clearBtn').addEventListener('click', resetInkCanvas);
@@ -883,9 +941,11 @@
                 landmarks = results.poseLandmarks;
                 smoothLandmarks();
                 lastPoseTime = Date.now();
+                updateDetectionStatus('Detecting');
                 document.getElementById('noPoseMessage').style.display = 'none';
                 console.log('✅ Pose detected - landmarks:', landmarks.length);
             } else {
+                updateDetectionStatus('Lost');
                 if (Date.now() - lastPoseTime > 2000) {
                     document.getElementById('noPoseMessage').style.display = 'block';
                     console.log('❌ No pose detected - check lighting and position');
@@ -957,19 +1017,50 @@
         let lastFpsUpdate = Date.now();
         let fps = 0;
         
+        function toggleWebcamFeed() {
+            showWebcamFeed = !showWebcamFeed;
+            const btn = document.getElementById('webcamToggle');
+            if (showWebcamFeed) {
+                btn.classList.add('on');
+                btn.classList.remove('off');
+                btn.textContent = '📹 Webcam Feed ON';
+            } else {
+                btn.classList.add('off');
+                btn.classList.remove('on');
+                btn.textContent = '📹 Webcam Feed OFF';
+            }
+        }
+        
         function updateFPS() {
-            frameCount++;
             const now = Date.now();
+            frameCount++;
+            
             const delta = now - lastFpsUpdate;
             
             if (delta >= 1000) {
                 fps = Math.round((frameCount * 1000) / delta);
                 const fpsElement = document.getElementById('fps');
+                const fpsDisplay = document.getElementById('fpsDisplay');
                 if (fpsElement) {
                     fpsElement.textContent = fps;
                 }
+                if (fpsDisplay) {
+                    fpsDisplay.textContent = `FPS: ${fps}`;
+                }
                 frameCount = 0;
                 lastFpsUpdate = now;
+            }
+        }
+        
+        function updateDetectionStatus(status) {
+            detectionStatus = status;
+            const statusElement = document.getElementById('detectionStatus');
+            if (statusElement) {
+                statusElement.textContent = status;
+                statusElement.style.background = status === 'Detecting' ? 
+                    'rgba(0, 255, 0, 0.2)' : 'rgba(255, 0, 0, 0.2)';
+                statusElement.style.borderColor = status === 'Detecting' ? 
+                    '#00ff00' : '#ff0000';
             }
         }
         
@@ -993,7 +1084,7 @@
             if (smoothedLandmarks.length > 0) {
                 switch (currentFilter) {
                     case 0: renderNeonSpecter(); break;
-                    case 1: renderStickmanSkeleton(); break;
+                    case 1: renderHumanStick(); break;
                     case 2: renderPhantomEcho(); break;
                     case 3: renderSilkStream(); break;
                     case 4: renderInkFury(); break;
@@ -1691,111 +1782,367 @@
             }, 1500);
         }
         
-        // FILTER 2: STICKMAN/SKELETON FILTER
-        function renderStickmanSkeleton() {
-            // Pure black background
+        // FILTER 2: HUMAN STICK (Dual Panel - Webcam + Colored Stick Figure)
+        function renderHumanStick() {
+            // Split canvas into two panels
+            const panelWidth = canvas.width / 2;
+            const panelHeight = canvas.height;
+            
+            // Clear entire canvas
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Draw white skeleton with glow
-            drawWhiteSkeleton();
+            // Draw vertical separator line
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(panelWidth, 0);
+            ctx.lineTo(panelWidth, panelHeight);
+            ctx.stroke();
+            
+            // LEFT PANEL: Original webcam feed with skeleton overlay
+            if (showWebcamFeed) {
+                // Draw webcam feed
+                ctx.drawImage(video, 0, 0, panelWidth, panelHeight);
+            } else {
+                // Black background if webcam hidden
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, panelWidth, panelHeight);
+            }
+            
+            // Draw skeleton overlay on left panel
+            drawSkeletonOverlay(0, 0, panelWidth, panelHeight, false);
+            
+            // RIGHT PANEL: Pure black background with colored stick figure
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(panelWidth, 0, panelWidth, panelHeight);
+            
+            // Draw perspective grid on right panel
+            drawPerspectiveGrid(panelWidth, 0, panelWidth, panelHeight);
+            
+            // Draw colored stick figure on right panel (mirrored)
+            drawColoredStickFigure(panelWidth, 0, panelWidth, panelHeight, true);
         }
         
-        function drawWhiteSkeleton() {
+        function drawNeonStickFigure() {
             if (smoothedLandmarks.length === 0) return;
             
             const lm = smoothedLandmarks;
             
-            // Set white glow effect
-            ctx.shadowBlur = 8;
-            ctx.shadowColor = 'white';
-            ctx.strokeStyle = 'white';
-            ctx.fillStyle = 'white';
+            // Set neon glow effect
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00FFFF'; // Neon cyan glow
+            ctx.strokeStyle = '#00FFFF'; // Neon cyan lines
+            ctx.fillStyle = '#FFFFFF'; // White joints
             
-            // Draw skull circle around head
-            const nose = lm[0];
-            const leftEar = lm[7];
-            const rightEar = lm[8];
-            
-            if (nose && leftEar && rightEar) {
-                const earDistance = Math.sqrt(
-                    Math.pow(leftEar.x - rightEar.x, 2) + 
-                    Math.pow(leftEar.y - rightEar.y, 2)
-                );
-                const skullRadius = earDistance * 0.8 * canvas.width;
-                
-                ctx.lineWidth = 8;
+            // Draw head (circle with neon glow)
+            const head = lm[0];
+            if (head) {
+                ctx.lineWidth = 4;
                 ctx.globalAlpha = 0.9;
                 ctx.beginPath();
-                ctx.arc(
-                    nose.x * canvas.width,
-                    nose.y * canvas.height,
-                    skullRadius,
-                    0, Math.PI * 2
-                );
+                ctx.arc(head.x * canvas.width, head.y * canvas.height, 25, 0, Math.PI * 2);
                 ctx.stroke();
-            }
-            
-            // Draw spine (shoulders to pelvis)
-            ctx.lineWidth = 10;
-            drawBone(lm[11], lm[12]); // shoulders
-            drawBone(lm[11], lm[23]); // left shoulder to hip
-            drawBone(lm[12], lm[24]); // right shoulder to hip
-            drawBone(lm[23], lm[24]); // pelvis
-            
-            // Draw ribcage (oval between shoulders and hips)
-            if (lm[11] && lm[12] && lm[23] && lm[24]) {
-                ctx.lineWidth = 8;
-                ctx.globalAlpha = 0.7;
+                
+                // Inner bright circle
+                ctx.fillStyle = '#FFFFFF';
                 ctx.beginPath();
-                ctx.ellipse(
-                    (lm[11].x + lm[12].x + lm[23].x + lm[24].x) / 4 * canvas.width,
-                    (lm[11].y + lm[12].y + lm[23].y + lm[24].y) / 4 * canvas.height,
-                    Math.abs(lm[11].x - lm[12].x) * canvas.width * 0.6,
-                    Math.abs(lm[11].y - lm[23].y) * canvas.height * 0.4,
-                    0, 0, Math.PI * 2
+                ctx.arc(head.x * canvas.width, head.y * canvas.height, 15, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw body (torso)
+            const leftShoulder = lm[11];
+            const rightShoulder = lm[12];
+            const leftHip = lm[23];
+            const rightHip = lm[24];
+            
+            if (leftShoulder && rightShoulder && leftHip && rightHip) {
+                ctx.lineWidth = 6;
+                ctx.globalAlpha = 0.8;
+                
+                // Torso rectangle with rounded edges
+                const torsoTop = (leftShoulder.y + rightShoulder.y) / 2 * canvas.height;
+                const torsoHeight = ((leftHip.y + rightHip.y) / 2 - (leftShoulder.y + rightShoulder.y) / 2) * canvas.height;
+                const torsoWidth = Math.abs(leftShoulder.x - rightShoulder.x) * canvas.width;
+                
+                ctx.beginPath();
+                ctx.roundRect(
+                    (leftShoulder.x + rightShoulder.x) / 2 * canvas.width - torsoWidth / 2,
+                    torsoTop,
+                    torsoWidth,
+                    torsoHeight,
+                    10
                 );
                 ctx.stroke();
             }
             
-            // Draw left arm
-            ctx.lineWidth = 9;
-            drawBone(lm[11], lm[13]); // shoulder to elbow
-            drawBone(lm[13], lm[15]); // elbow to wrist
+            // Draw arms (lines)
+            const leftElbow = lm[13];
+            const leftWrist = lm[15];
+            const rightElbow = lm[14];
+            const rightWrist = lm[16];
             
-            // Draw right arm
-            drawBone(lm[12], lm[14]); // shoulder to elbow
-            drawBone(lm[14], lm[16]); // elbow to wrist
+            ctx.lineWidth = 4;
+            ctx.globalAlpha = 0.7;
             
-            // Draw left leg
-            ctx.lineWidth = 10;
-            drawBone(lm[23], lm[25]); // hip to knee
-            drawBone(lm[25], lm[27]); // knee to ankle
+            // Left arm
+            if (leftShoulder && leftElbow && leftWrist) {
+                drawNeonLine(leftShoulder, leftElbow);
+                drawNeonLine(leftElbow, leftWrist);
+            }
             
-            // Draw right leg
-            drawBone(lm[24], lm[26]); // hip to knee
-            drawBone(lm[26], lm[28]); // knee to ankle
+            // Right arm
+            if (rightShoulder && rightElbow && rightWrist) {
+                drawNeonLine(rightShoulder, rightElbow);
+                drawNeonLine(rightElbow, rightWrist);
+            }
             
-            // Draw joint circles
+            // Draw legs (lines)
+            const leftKnee = lm[25];
+            const leftAnkle = lm[27];
+            const rightKnee = lm[26];
+            const rightAnkle = lm[28];
+            
+            // Left leg
+            if (leftHip && leftKnee && leftAnkle) {
+                drawNeonLine(leftHip, leftKnee);
+                drawNeonLine(leftKnee, leftAnkle);
+            }
+            
+            // Right leg
+            if (rightHip && rightKnee && rightAnkle) {
+                drawNeonLine(rightHip, rightKnee);
+                drawNeonLine(rightKnee, rightAnkle);
+            }
+            
+            // Draw joints (bright circles)
             ctx.globalAlpha = 1.0;
-            const joints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 31, 32];
+            const joints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
             joints.forEach(index => {
                 const joint = lm[index];
                 if (joint) {
+                    ctx.shadowBlur = 20;
+                    ctx.shadowColor = '#FFFFFF';
+                    ctx.fillStyle = '#FFFFFF';
                     ctx.beginPath();
-                    ctx.arc(
-                        joint.x * canvas.width,
-                        joint.y * canvas.height,
-                        7, // Joint radius
-                        0, Math.PI * 2
-                    );
+                    ctx.arc(joint.x * canvas.width, joint.y * canvas.height, 8, 0, Math.PI * 2);
                     ctx.fill();
                 }
             });
             
-            // Reset shadow
+            // Reset effects
             ctx.shadowBlur = 0;
             ctx.globalAlpha = 1.0;
+        }
+        
+        function drawNeonLine(start, end) {
+            if (!start || !end) return;
+            
+            ctx.beginPath();
+            ctx.moveTo(start.x * canvas.width, start.y * canvas.height);
+            ctx.lineTo(end.x * canvas.width, end.y * canvas.height);
+            ctx.stroke();
+        }
+        
+        function drawSkeletonOverlay(offsetX, offsetY, panelWidth, panelHeight, mirror) {
+            if (smoothedLandmarks.length === 0) return;
+            
+            const lm = smoothedLandmarks;
+            
+            // Set skeleton overlay style
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.lineWidth = 3;
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = '#FFFFFF';
+            
+            // Draw skeleton connections
+            const connections = [
+                [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], // Face
+                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Arms
+                [11, 23], [12, 24], [23, 24], // Torso
+                [23, 25], [25, 27], [24, 26], [26, 28] // Legs
+            ];
+            
+            connections.forEach(([start, end]) => {
+                const startLandmark = lm[start];
+                const endLandmark = lm[end];
+                if (startLandmark && endLandmark) {
+                    const startX = mirror ? panelWidth - (startLandmark.x * panelWidth) : startLandmark.x * panelWidth;
+                    const startY = startLandmark.y * panelHeight;
+                    const endX = mirror ? panelWidth - (endLandmark.x * panelWidth) : endLandmark.x * panelWidth;
+                    const endY = endLandmark.y * panelHeight;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX + startX, offsetY + startY);
+                    ctx.lineTo(offsetX + endX, offsetY + endY);
+                    ctx.stroke();
+                }
+            });
+            
+            // Draw joints
+            lm.forEach((landmark, index) => {
+                if (landmark && landmark.visibility > confidenceThreshold) {
+                    const x = mirror ? panelWidth - (landmark.x * panelWidth) : landmark.x * panelWidth;
+                    const y = landmark.y * panelHeight;
+                    
+                    ctx.beginPath();
+                    ctx.arc(offsetX + x, offsetY + y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            ctx.shadowBlur = 0;
+        }
+        
+        function drawPerspectiveGrid(offsetX, offsetY, panelWidth, panelHeight) {
+            ctx.strokeStyle = 'rgba(80, 120, 255, 0.15)';
+            ctx.lineWidth = 1;
+            
+            // Draw isometric grid
+            const gridSize = 30;
+            const centerX = offsetX + panelWidth / 2;
+            const centerY = offsetY + panelHeight * 0.8;
+            
+            // Horizontal lines (vanishing to horizon)
+            for (let i = -10; i <= 10; i++) {
+                ctx.beginPath();
+                const y = centerY + i * gridSize / 2;
+                const perspective = (y - centerY) / panelHeight;
+                const width = panelWidth * (1 + perspective * 0.5);
+                
+                ctx.moveTo(centerX - width / 2, y);
+                ctx.lineTo(centerX + width / 2, y);
+                ctx.stroke();
+            }
+            
+            // Diagonal lines converging to vanishing point
+            for (let i = -10; i <= 10; i++) {
+                ctx.beginPath();
+                const x = centerX + i * gridSize;
+                
+                ctx.moveTo(x, centerY);
+                ctx.lineTo(centerX, offsetY);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(x, centerY);
+                ctx.lineTo(centerX + i * gridSize * 2, offsetY + panelHeight);
+                ctx.stroke();
+            }
+        }
+        
+        function drawColoredStickFigure(offsetX, offsetY, panelWidth, panelHeight, mirror) {
+            if (smoothedLandmarks.length === 0) return;
+            
+            const lm = smoothedLandmarks;
+            
+            // Set line properties
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.shadowBlur = 0;
+            
+            // Define bone connections with exact colors
+            const boneColors = {
+                headToNeck: '#ff3333',      // Red
+                neckToChest: '#00ccff',      // Cyan
+                shoulderCross: '#cc44ff',     // Magenta
+                collarbone: '#cc44ff',       // Magenta
+                upperArms: '#4466ff',        // Blue
+                forearms: '#4488ff',         // Lighter blue
+                spine: '#ff3333',            // Red
+                hipBar: '#ffdd00',           // Yellow
+                upperLegs: '#00dd44',        // Bright green
+                lowerLegs: '#00bb33',        // Darker green
+                anklesFeet: '#ff4444'        // Red
+            };
+            
+            // Scale figure to fill 60% of panel height
+            const scale = 0.6;
+            const scaleY = panelHeight * scale;
+            
+            // Draw head-to-neck (red)
+            drawColoredBone(lm[0], lm[1], boneColors.headToNeck, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw neck-to-chest (cyan)
+            drawColoredBone(lm[1], lm[11], boneColors.neckToChest, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            drawColoredBone(lm[1], lm[12], boneColors.neckToChest, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw shoulder cross and collarbone (magenta)
+            drawColoredBone(lm[11], lm[12], boneColors.shoulderCross, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw upper arms (blue)
+            drawColoredBone(lm[11], lm[13], boneColors.upperArms, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            drawColoredBone(lm[12], lm[14], boneColors.upperArms, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw forearms (lighter blue)
+            drawColoredBone(lm[13], lm[15], boneColors.forearms, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            drawColoredBone(lm[14], lm[16], boneColors.forearms, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw spine (red)
+            drawColoredBone(lm[11], lm[23], boneColors.spine, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            drawColoredBone(lm[12], lm[24], boneColors.spine, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw hip bar (yellow)
+            drawColoredBone(lm[23], lm[24], boneColors.hipBar, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw upper legs (bright green)
+            drawColoredBone(lm[23], lm[25], boneColors.upperLegs, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            drawColoredBone(lm[24], lm[26], boneColors.upperLegs, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw lower legs (darker green)
+            drawColoredBone(lm[25], lm[27], boneColors.lowerLegs, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            drawColoredBone(lm[26], lm[28], boneColors.lowerLegs, offsetX, offsetY, panelWidth, panelHeight, mirror, scale);
+            
+            // Draw joints with specific colors
+            drawColoredJoint(lm[0], boneColors.headToNeck, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Head
+            drawColoredJoint(lm[11], boneColors.shoulderCross, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Left shoulder
+            drawColoredJoint(lm[12], boneColors.shoulderCross, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Right shoulder
+            drawColoredJoint(lm[13], boneColors.upperArms, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Left elbow
+            drawColoredJoint(lm[14], boneColors.upperArms, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Right elbow
+            drawColoredJoint(lm[15], '#ff8800', offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Left wrist (orange)
+            drawColoredJoint(lm[16], '#ff8800', offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Right wrist (orange)
+            drawColoredJoint(lm[23], '#ffdd00', offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Left hip (yellow)
+            drawColoredJoint(lm[24], '#ffdd00', offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Right hip (yellow)
+            drawColoredJoint(lm[25], boneColors.upperLegs, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Left knee
+            drawColoredJoint(lm[26], boneColors.upperLegs, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Right knee
+            drawColoredJoint(lm[27], boneColors.anklesFeet, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Left ankle (red)
+            drawColoredJoint(lm[28], boneColors.anklesFeet, offsetX, offsetY, panelWidth, panelHeight, mirror, scale); // Right ankle (red)
+        }
+        
+        function drawColoredBone(start, end, color, offsetX, offsetY, panelWidth, panelHeight, mirror, scale) {
+            if (!start || !end || start.visibility < confidenceThreshold || end.visibility < confidenceThreshold) return;
+            
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            
+            const startX = mirror ? offsetX + panelWidth - (start.x * panelWidth) : offsetX + (start.x * panelWidth);
+            const startY = offsetY + (start.y * panelHeight * scale);
+            const endX = mirror ? offsetX + panelWidth - (end.x * panelWidth) : offsetX + (end.x * panelWidth);
+            const endY = offsetY + (end.y * panelHeight * scale);
+            
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+        }
+        
+        function drawColoredJoint(landmark, color, offsetX, offsetY, panelWidth, panelHeight, mirror, scale) {
+            if (!landmark || landmark.visibility < confidenceThreshold) {
+                // Draw dimmed gray for low confidence
+                color = '#666666';
+            }
+            
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            
+            const x = mirror ? offsetX + panelWidth - (landmark.x * panelWidth) : offsetX + (landmark.x * panelWidth);
+            const y = offsetY + (landmark.y * panelHeight * scale);
+            
+            ctx.arc(x, y, 7, 0, Math.PI * 2);
+            ctx.fill();
         }
         
         function drawBone(start, end) {
