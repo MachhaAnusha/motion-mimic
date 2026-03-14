@@ -4050,17 +4050,16 @@
         
         // FILTER 5: SILK STREAM - HOLOGRAPHIC RIBBON TRAILS (MOVEMENT-BASED)
         const HOLOGRAPHIC_CONFIG = {
-            maxTrailPoints: 1000, // Very high limit - only clear when hand stops
+            maxTrailPoints: 1000,
             baseWidth: 28,
-            fadeAmount: 1.0, // Full clear - no persistence
             colors: ['#a78bfa', '#60a5fa', '#34d399', '#f472b6', '#67e8f9'],
             leftBaseHue: 280,
             rightBaseHue: 200,
             landmarkIndex: 9,
-            maxJumpDistance: 150, // Increased - don't clear on normal fast movements
-            minMovementDistance: 1, // Very sensitive - detect tiny movements
-            stopThreshold: 30, // Increased - clear trail only after 30 frames (0.5s) of no movement
-            maxAge: 10000 // Very high - only clear on stop, not time
+            maxJumpDistance: 150,
+            minMovementDistance: 1,
+            stopThreshold: 8,   // frames of no movement before fade starts
+            fadeSpeed: 3        // tail points removed per frame during fade
         };
         
         let holographicTrails = {
@@ -4076,100 +4075,67 @@
             left: 0,
             right: 0
         };
+        let isFading = { left: false, right: false };
         
         function processHandData(landmarks, handedness) {
             const now = Date.now();
-            
             landmarks.forEach((handLandmarks, index) => {
                 const hand = handedness[index];
                 if (!hand || hand.score < 0.8) return;
-                
                 const handLabel = hand.label;
                 const trailKey = handLabel.toLowerCase();
-                
                 const landmark = handLandmarks[HOLOGRAPHIC_CONFIG.landmarkIndex];
                 if (!landmark) return;
-                
-                // Direct position - NO LERP/SMOOTHING for real-time
                 const rawX = (1 - landmark.x) * canvas.width;
                 const rawY = landmark.y * canvas.height;
-                
-                // Check for fast movement - clear trail on jumps
                 const lastPos = lastHandPositions[trailKey];
                 let moved = false;
-                
                 if (lastPos.x !== 0 || lastPos.y !== 0) {
                     const jump = Math.hypot(rawX - lastPos.x, rawY - lastPos.y);
                     if (jump > HOLOGRAPHIC_CONFIG.maxJumpDistance) {
                         holographicTrails[trailKey].length = 0;
-                        console.log(`Cleared ${handLabel} trail due to fast movement: ${jump.toFixed(1)}px`);
+                        isFading[trailKey] = false;
                     }
-                    
-                    // Check if hand actually moved - more sensitive detection
                     if (jump >= HOLOGRAPHIC_CONFIG.minMovementDistance) {
                         moved = true;
-                        framesWithoutMovement[trailKey] = 0; // Reset movement counter
+                        framesWithoutMovement[trailKey] = 0;
+                        isFading[trailKey] = false; // hand moved again — cancel fade
                     }
                 } else {
-                    // First detection - count as movement
                     moved = true;
                     framesWithoutMovement[trailKey] = 0;
+                    isFading[trailKey] = false;
                 }
-                
                 lastHandPositions[trailKey] = { x: rawX, y: rawY };
-                
-                // Only add point if hand actually moved
                 if (!moved) {
                     framesWithoutMovement[trailKey]++;
-                    
-                    // Clear trail only if hand stopped for threshold frames (increased tolerance)
                     if (framesWithoutMovement[trailKey] > HOLOGRAPHIC_CONFIG.stopThreshold) {
-                        holographicTrails[trailKey].length = 0;
-                        console.log(`Cleared ${handLabel} trail - hand stopped moving for ${framesWithoutMovement[trailKey]} frames`);
+                        isFading[trailKey] = true; // start fading
                     }
                     return;
                 }
-                
-                // Add new point with timestamp
-                holographicTrails[trailKey].push({
-                    x: rawX,
-                    y: rawY,
-                    time: now,
-                    age: 0
-                });
-                
-                // Remove old points - only if exceeding max limit (very high)
+                holographicTrails[trailKey].push({ x: rawX, y: rawY, time: now, age: 0 });
                 if (holographicTrails[trailKey].length > HOLOGRAPHIC_CONFIG.maxTrailPoints) {
                     holographicTrails[trailKey].shift();
                 }
-                
-                // Don't remove based on age - only clear when hand stops
-                console.log(`Added ${handLabel} trail point - movement detected`);
             });
         }
         
         function updateHandLoss() {
-            // Only clear if no hands detected at all
-            // Don't clear based on time - only when hand stops moving
             Object.keys(holographicTrails).forEach(hand => {
                 framesWithoutMovement[hand]++;
-                
-                // Clear trail only if no hand detected for many frames
-                if (framesWithoutMovement[hand] > 30) { // 0.5 seconds without any detection
-                    holographicTrails[hand].length = 0;
-                    console.log(`Cleared ${hand} trail - no hand detected`);
+                if (framesWithoutMovement[hand] > HOLOGRAPHIC_CONFIG.stopThreshold) {
+                    isFading[hand] = true;
                 }
             });
         }
         
         function renderSilkStream() {
             holographicFrameCount++;
-            
-            // FADE instead of full clear for painting effect
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.02)'; // Very slow fade for painting
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 1)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Draw very faint video feed
+
             if (video.readyState === 4) {
                 ctx.globalAlpha = 0.05;
                 ctx.save();
@@ -4178,11 +4144,20 @@
                 ctx.restore();
                 ctx.globalAlpha = 1.0;
             }
-            
-            // Update hand loss
+
             updateHandLoss();
-            
-            // Draw holographic ribbons with painting effect
+
+            // Gradually remove tail points when fading — ribbon shrinks from oldest end toward hand
+            ['left', 'right'].forEach(hand => {
+                if (isFading[hand] && holographicTrails[hand].length > 0) {
+                    const removeCount = Math.min(HOLOGRAPHIC_CONFIG.fadeSpeed, holographicTrails[hand].length);
+                    holographicTrails[hand].splice(0, removeCount);
+                    if (holographicTrails[hand].length === 0) {
+                        isFading[hand] = false;
+                    }
+                }
+            });
+
             drawHolographicRibbon(holographicTrails.left, HOLOGRAPHIC_CONFIG.leftBaseHue);
             drawHolographicRibbon(holographicTrails.right, HOLOGRAPHIC_CONFIG.rightBaseHue);
         }
