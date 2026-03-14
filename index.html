@@ -465,7 +465,17 @@
         let confidenceThreshold = 0.5;
         let detectionStatus = 'Lost';
         const smoothingAlpha = 0.3;
-        let leftPanel, rightPanel;
+        // Neon Human Outline performance variables
+        let neonOutlineCanvas, neonOutlineCtx;
+        let lastSegmentationTime = 0;
+        let segmentationCompleted = false;
+        let currentEdges = null;
+        const SEGMENTATION_INTERVAL = 100; // ms
+        const PROCESSING_WIDTH = 320;
+        const PROCESSING_HEIGHT = 240;
+        const TARGET_FPS = 30;
+        const FRAME_DELAY = 1000 / TARGET_FPS;
+        let lastFrameTime = 0;
         
         // Filter-specific data
         let motionTrail = [];
@@ -478,13 +488,25 @@
         function resetFilterData() {
             motionTrail = [];
             particles = [];
-            inkParticles = [];
-            splatBlobs = [];
             inkDrips = [];
             mistParticles = [];
             impactRings = [];
             poseBuffer = [];
             jointHistory = {};
+            
+            // Initialize Neon Human Outline canvas
+            if (!neonOutlineCanvas) {
+                neonOutlineCanvas = document.createElement('canvas');
+                neonOutlineCanvas.width = PROCESSING_WIDTH;
+                neonOutlineCanvas.height = PROCESSING_HEIGHT;
+                neonOutlineCtx = neonOutlineCanvas.getContext('2d');
+                console.log('✅ Neon Outline canvas initialized:', PROCESSING_WIDTH + 'x' + PROCESSING_HEIGHT);
+            }
+            
+            lastSegmentationTime = 0;
+            segmentationCompleted = false;
+            currentEdges = null;
+            
             console.log("Filter data reset - all particles and trails cleared");
         }
         
@@ -2124,41 +2146,207 @@
         }
         
         function processNeonHumanOutline() {
-            if (!video || !selfieSegmentation) return;
+            const currentTime = performance.now();
             
-            // Create processing canvases
-            const processCanvas = document.createElement('canvas');
-            processCanvas.width = 640;
-            processCanvas.height = 480;
-            const processCtx = processCanvas.getContext('2d');
+            // FPS limiter
+            if (currentTime - lastFrameTime < FRAME_DELAY) {
+                return;
+            }
+            lastFrameTime = currentTime;
             
-            // Draw video frame to processing canvas
-            processCtx.drawImage(video, 0, 0, 640, 480);
-            
-            // Get image data
-            const imageData = processCtx.getImageData(0, 0, 640, 480);
-            const data = imageData.data;
-            
-            // Apply segmentation mask if available
-            if (segmentationMask) {
-                for (let i = 0; i < data.length; i += 4) {
-                    const maskValue = segmentationMask.data[i / 4];
-                    if (maskValue < 0.5) {
-                        // Not human - make black
-                        data[i] = 0;     // R
-                        data[i + 1] = 0; // G
-                        data[i + 2] = 0; // B
-                        data[i + 3] = 255; // A (transparent)
+            try {
+                // Run segmentation only every 100ms
+                if (currentTime - lastSegmentationTime > SEGMENTATION_INTERVAL && !segmentationCompleted) {
+                    console.log('🔍 Starting segmentation...');
+                    const segStart = performance.now();
+                    
+                    if (video && selfieSegmentation && neonOutlineCanvas) {
+                        // Draw downscaled video to processing canvas
+                        neonOutlineCtx.drawImage(video, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+                        
+                        // Run segmentation
+                        selfieSegmentation.send({ image: neonOutlineCanvas });
+                        segmentationCompleted = true;
+                        lastSegmentationTime = currentTime;
+                        
+                        const segTime = performance.now() - segStart;
+                        console.log(`⏱️ Segmentation time: ${segTime.toFixed(2)}ms`);
                     }
                 }
-                processCtx.putImageData(imageData, 0, 0);
+                
+                // Render edges if segmentation completed
+                if (currentEdges && segmentationCompleted) {
+                    const renderStart = performance.now();
+                    renderOptimizedNeonEdges(currentEdges);
+                    const renderTime = performance.now() - renderStart;
+                    console.log(`🎨 Render time: ${renderTime.toFixed(2)}ms`);
+                }
+                
+            } catch (error) {
+                console.error('❌ Neon Outline processing error:', error);
+                // Fallback to simple outline mode
+                renderFallbackOutline();
+            }
+        }
+        
+        function onSegmentationResults(results) {
+            try {
+                const edgeStart = performance.now();
+                
+                if (results.segmentationMask && neonOutlineCanvas) {
+                    segmentationMask = results.segmentationMask;
+                    
+                    // Apply mask and run edge detection
+                    const edges = runOptimizedEdgeDetection();
+                    currentEdges = edges;
+                    segmentationCompleted = true;
+                    
+                    const edgeTime = performance.now() - edgeStart;
+                    console.log(`⚡ Edge detection time: ${edgeTime.toFixed(2)}ms`);
+                }
+            } catch (error) {
+                console.error('❌ Segmentation processing error:', error);
+                segmentationCompleted = false;
+            }
+        }
+        
+        function runOptimizedEdgeDetection() {
+            if (!neonOutlineCtx || !segmentationMask) return null;
+            
+            // Get image data
+            const imageData = neonOutlineCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            const data = imageData.data;
+            
+            // Apply segmentation mask
+            for (let i = 0; i < data.length; i += 4) {
+                const maskValue = segmentationMask.data[i / 4];
+                if (maskValue < 0.5) {
+                    data[i] = 0;     // R
+                    data[i + 1] = 0; // G
+                    data[i + 2] = 0; // B
+                    data[i + 3] = 255; // A
+                }
             }
             
-            // Run Canny edge detection on segmented image
-            const edges = detectCannyEdges(processCtx, 640, 480);
+            neonOutlineCtx.putImageData(imageData, 0, 0);
             
-            // Render neon edges
-            renderNeonEdges(edges, 640, 480);
+            // Simplified edge detection for performance
+            return detectSimplifiedEdges(neonOutlineCtx, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+        }
+        
+        function detectSimplifiedEdges(ctx, width, height) {
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            const edges = new Uint8ClampedArray(width * height);
+            
+            // Convert to grayscale
+            const gray = new Uint8ClampedArray(width * height);
+            for (let i = 0; i < data.length; i += 4) {
+                const idx = i / 4;
+                gray[idx] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+            }
+            
+            // Simple Sobel edge detection (optimized)
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = y * width + x;
+                    
+                    const gx = 
+                        -gray[(y-1) * width + (x-1)] +
+                        gray[(y+1) * width + (x-1)] +
+                        -2 * (gray[(y-1) * width + x] - gray[(y+1) * width + x]) +
+                        -gray[(y-1) * width + (x+1)] +
+                        gray[(y+1) * width + (x+1)];
+                    
+                    const gy = 
+                        -gray[(y-1) * width + (x-1)] +
+                        -2 * (gray[y * width + (x-1)] - gray[y * width + (x+1)]) +
+                        -gray[(y+1) * width + (x-1)] +
+                        gray[(y+1) * width + (x+1)];
+                    
+                    const magnitude = Math.sqrt(gx * gx + gy * gy);
+                    edges[idx] = magnitude > 50 ? 255 : 0;
+                }
+            }
+            
+            return edges;
+        }
+        
+        function renderOptimizedNeonEdges(edges) {
+            // Clear canvas efficiently
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Multi-color neon gradient animation
+            const time = performance.now() * 0.001;
+            const colors = [
+                '#FF00FF', // Magenta
+                '#8A2BE2', // Purple
+                '#00FFFF', // Cyan
+                '#00FF7F', // Green
+                '#FFFF00'  // Yellow
+            ];
+            
+            // Scale to full canvas
+            const scaleX = canvas.width / PROCESSING_WIDTH;
+            const scaleY = canvas.height / PROCESSING_HEIGHT;
+            
+            // Render layered neon edges (optimized)
+            const layers = [
+                { alpha: 0.2, blur: 30, width: 18 },
+                { alpha: 0.5, blur: 15, width: 10 },
+                { alpha: 1.0, blur: 5, width: 2 }
+            ];
+            
+            layers.forEach(layer => {
+                ctx.globalAlpha = layer.alpha;
+                ctx.shadowBlur = layer.blur;
+                ctx.lineWidth = layer.width;
+                ctx.lineCap = 'round';
+                
+                // Batch render edges for performance
+                ctx.beginPath();
+                
+                for (let y = 0; y < PROCESSING_HEIGHT; y++) {
+                    for (let x = 0; x < PROCESSING_WIDTH; x++) {
+                        const idx = y * PROCESSING_WIDTH + x;
+                        
+                        if (edges[idx] > 0) {
+                            const screenX = x * scaleX;
+                            const screenY = y * scaleY;
+                            
+                            // Animated color cycling
+                            const colorIndex = Math.floor((screenX + screenY + time) / 100) % colors.length;
+                            ctx.strokeStyle = colors[colorIndex];
+                            ctx.shadowColor = colors[colorIndex];
+                            
+                            // Draw point as small line for performance
+                            ctx.moveTo(screenX, screenY);
+                            ctx.lineTo(screenX + 1, screenY);
+                        }
+                    }
+                }
+                
+                ctx.stroke();
+            });
+            
+            // Reset
+            ctx.globalAlpha = 1.0;
+            ctx.shadowBlur = 0;
+        }
+        
+        function renderFallbackOutline() {
+            // Simple fallback if segmentation fails
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#FF00FF';
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#FF00FF';
+            
+            // Draw simple rectangle outline
+            ctx.strokeRect(100, 100, canvas.width - 200, canvas.height - 200);
+            
+            ctx.shadowBlur = 0;
+            console.log('⚠️ Using fallback outline mode');
         }
         
         function detectCannyEdges(ctx, width, height) {
