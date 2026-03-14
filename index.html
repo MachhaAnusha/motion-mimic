@@ -499,7 +499,9 @@
                 neonOutlineCanvas = document.createElement('canvas');
                 neonOutlineCanvas.width = PROCESSING_WIDTH;
                 neonOutlineCanvas.height = PROCESSING_HEIGHT;
-                neonOutlineCtx = neonOutlineCanvas.getContext('2d');
+                neonOutlineCtx = neonOutlineCanvas.getContext('2d', {
+                    willReadFrequently: true
+                });
                 console.log('✅ Neon Outline canvas initialized:', PROCESSING_WIDTH + 'x' + PROCESSING_HEIGHT);
             }
             
@@ -525,7 +527,9 @@
         // Initialize application
         function init() {
             canvas = document.getElementById('mainCanvas');
-            ctx = canvas.getContext('2d');
+            ctx = canvas.getContext('2d', {
+                willReadFrequently: true
+            });
             video = document.getElementById('videoElement');
             
             // Check if elements exist before proceeding
