@@ -368,6 +368,12 @@
             <span class="shortcut">5</span>
         </button>
         
+        <button class="filter-btn" data-filter="5">
+            <span class="emoji">🏺</span>
+            <span>Warli Art</span>
+            <span class="shortcut">6</span>
+        </button>
+        
         <div class="top-controls">
             <button class="camera-toggle off" id="cameraToggle">
                 📷 Camera OFF
@@ -781,7 +787,7 @@
                     console.log(`Filter button clicked: ${filterIndex} - "${buttonText}" - data-filter: ${newBtn.dataset.filter}`);
                     
                     // Validate the filter index
-                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 4) {
+                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 5) {
                         console.error(`Invalid filter index: ${filterIndex}`);
                         return;
                     }
@@ -834,6 +840,7 @@
                     case '3': switchFilter(2); break;  // Neon Human Outline
                     case '4': switchFilter(3); break;  // Silk Stream
                     case '5': switchFilter(4); break;  // Stardust Man
+                    case '6': switchFilter(5); break;  // Warli Art
                     case 'f': case 'F':
                         toggleFullscreen();
                         break;
@@ -1276,6 +1283,7 @@
                     case 1: renderStickMan(); break;
                     case 3: renderSilkStream(); break;
                     case 4: renderStardustMan(); break;
+                    case 5: renderWarliArt(); break;
                 }
             }
             
@@ -4380,6 +4388,214 @@
             });
 
             ctx.globalAlpha = 1.0;
+        }
+        
+        // FILTER 6: WARLI ART - TRIBAL GEOMETRIC HUMAN FIGURE
+        function renderWarliArt() {
+            if (smoothedLandmarks.length === 0) return;
+            const lm = smoothedLandmarks;
+            const cw = canvas.width, ch = canvas.height;
+
+            // --- BACKGROUND: earthy brown like Warli paintings ---
+            ctx.fillStyle = '#7B2D00';
+            ctx.fillRect(0, 0, cw, ch);
+
+            // Add subtle texture feel with a slightly lighter center
+            const grad = ctx.createRadialGradient(cw/2, ch/2, 0, cw/2, ch/2, cw * 0.7);
+            grad.addColorStop(0, 'rgba(120, 60, 10, 0.3)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, cw, ch);
+
+            // --- BORDER: traditional Warli decorative border ---
+            const bw = Math.min(cw, ch) * 0.04; // border width
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 2;
+
+            // Outer rectangle border
+            ctx.strokeRect(bw * 0.5, bw * 0.5, cw - bw, ch - bw);
+            ctx.strokeRect(bw, bw, cw - bw * 2, ch - bw * 2);
+
+            // Draw triangular zigzag pattern along all 4 edges
+            const triSize = bw * 0.7;
+            ctx.fillStyle = '#FFFFFF';
+
+            // Top edge triangles
+            for (let x = bw; x < cw - bw; x += triSize * 2) {
+                ctx.beginPath();
+                ctx.moveTo(x, bw);
+                ctx.lineTo(x + triSize, bw * 0.2);
+                ctx.lineTo(x + triSize * 2, bw);
+                ctx.closePath();
+                ctx.fill();
+            }
+            // Bottom edge triangles (pointing up)
+            for (let x = bw; x < cw - bw; x += triSize * 2) {
+                ctx.beginPath();
+                ctx.moveTo(x, ch - bw);
+                ctx.lineTo(x + triSize, ch - bw * 0.2);
+                ctx.lineTo(x + triSize * 2, ch - bw);
+                ctx.closePath();
+                ctx.fill();
+            }
+            // Left edge triangles
+            for (let y = bw; y < ch - bw; y += triSize * 2) {
+                ctx.beginPath();
+                ctx.moveTo(bw, y);
+                ctx.lineTo(bw * 0.2, y + triSize);
+                ctx.lineTo(bw, y + triSize * 2);
+                ctx.closePath();
+                ctx.fill();
+            }
+            // Right edge triangles
+            for (let y = bw; y < ch - bw; y += triSize * 2) {
+                ctx.beginPath();
+                ctx.moveTo(cw - bw, y);
+                ctx.lineTo(cw - bw * 0.2, y + triSize);
+                ctx.lineTo(cw - bw, y + triSize * 2);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // Dot row inside border
+            ctx.fillStyle = '#FFFFFF';
+            const dotSpacing = triSize * 2;
+            const dotR = bw * 0.15;
+            const dotY1 = bw * 1.5, dotY2 = ch - bw * 1.5;
+            const dotX1 = bw * 1.5, dotX2 = cw - bw * 1.5;
+            for (let x = bw * 2; x < cw - bw * 2; x += dotSpacing) {
+                ctx.beginPath(); ctx.arc(x, dotY1, dotR, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(x, dotY2, dotR, 0, Math.PI * 2); ctx.fill();
+            }
+            for (let y = bw * 2; y < ch - bw * 2; y += dotSpacing) {
+                ctx.beginPath(); ctx.arc(dotX1, y, dotR, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(dotX2, y, dotR, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // --- WARLI FIGURE: drawn using pose landmarks ---
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // Helper: landmark to canvas coords (mirrored)
+            const lx = (i) => (1 - lm[i].x) * cw;
+            const ly = (i) => lm[i].y * ch;
+
+            // Key points
+            const headX = lx(0), headY = ly(0);
+            const lShoulderX = lx(11), lShoulderY = ly(11);
+            const rShoulderX = lx(12), rShoulderY = ly(12);
+            const lHipX = lx(23), lHipY = ly(23);
+            const rHipX = lx(24), rHipY = ly(24);
+            const lElbowX = lx(13), lElbowY = ly(13);
+            const rElbowX = lx(14), rElbowY = ly(14);
+            const lWristX = lx(15), lWristY = ly(15);
+            const rWristX = lx(16), rWristY = ly(16);
+            const lKneeX = lx(25), lKneeY = ly(25);
+            const rKneeX = lx(26), rKneeY = ly(26);
+            const lAnkleX = lx(27), lAnkleY = ly(27);
+            const rAnkleX = lx(28), rAnkleY = ly(28);
+
+            // Compute body proportions
+            const shoulderMidX = (lShoulderX + rShoulderX) / 2;
+            const shoulderMidY = (lShoulderY + rShoulderY) / 2;
+            const hipMidX = (lHipX + rHipX) / 2;
+            const hipMidY = (lHipY + rHipY) / 2;
+            const shoulderWidth = Math.abs(lShoulderX - rShoulderX);
+            const torsoHeight = Math.abs(hipMidY - shoulderMidY);
+
+            // Head — circle
+            const headRadius = shoulderWidth * 0.28;
+            ctx.beginPath();
+            ctx.arc(headX, headY, headRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Neck — line from head to shoulder midpoint
+            const lineW = Math.max(2, shoulderWidth * 0.06);
+            ctx.lineWidth = lineW;
+            ctx.beginPath();
+            ctx.moveTo(headX, headY + headRadius);
+            ctx.lineTo(shoulderMidX, shoulderMidY);
+            ctx.stroke();
+
+            // Upper torso — inverted triangle (shoulders → waist center)
+            // In Warli art the torso is two triangles: upper body (inverted) + skirt (upright)
+            const waistX = (shoulderMidX + hipMidX) / 2;
+            const waistY = (shoulderMidY + hipMidY) / 2;
+            ctx.beginPath();
+            ctx.moveTo(lShoulderX, shoulderMidY);
+            ctx.lineTo(rShoulderX, shoulderMidY);
+            ctx.lineTo(waistX, waistY);
+            ctx.closePath();
+            ctx.fill();
+
+            // Lower skirt — upright triangle (waist → hips)
+            const skirtBottom = hipMidY + torsoHeight * 0.5;
+            const skirtWidth = shoulderWidth * 0.9;
+            ctx.beginPath();
+            ctx.moveTo(waistX, waistY);
+            ctx.lineTo(waistX - skirtWidth / 2, skirtBottom);
+            ctx.lineTo(waistX + skirtWidth / 2, skirtBottom);
+            ctx.closePath();
+            ctx.fill();
+
+            // Decorative dots on torso (Warli style necklace/pattern)
+            const dotSize = headRadius * 0.2;
+            ctx.fillStyle = '#7B2D00';
+            for (let d = 0; d < 5; d++) {
+                const t = d / 4;
+                const dx = lShoulderX + (rShoulderX - lShoulderX) * (0.2 + t * 0.6);
+                const dy = shoulderMidY + torsoHeight * 0.12;
+                ctx.beginPath();
+                ctx.arc(dx, dy, dotSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = '#FFFFFF';
+
+            // Left arm — line from left shoulder to elbow to wrist
+            ctx.lineWidth = lineW;
+            ctx.beginPath();
+            ctx.moveTo(lShoulderX, shoulderMidY);
+            ctx.lineTo(lElbowX, lElbowY);
+            ctx.lineTo(lWristX, lWristY);
+            ctx.stroke();
+
+            // Right arm
+            ctx.beginPath();
+            ctx.moveTo(rShoulderX, shoulderMidY);
+            ctx.lineTo(rElbowX, rElbowY);
+            ctx.lineTo(rWristX, rWristY);
+            ctx.stroke();
+
+            // Small circles at wrists (hands)
+            const handR = headRadius * 0.22;
+            ctx.beginPath(); ctx.arc(lWristX, lWristY, handR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(rWristX, rWristY, handR, 0, Math.PI * 2); ctx.fill();
+
+            // Left leg — from hip to knee to ankle
+            ctx.lineWidth = lineW;
+            ctx.beginPath();
+            ctx.moveTo(waistX - skirtWidth * 0.25, skirtBottom);
+            ctx.lineTo(lKneeX, lKneeY);
+            ctx.lineTo(lAnkleX, lAnkleY);
+            ctx.stroke();
+
+            // Right leg
+            ctx.beginPath();
+            ctx.moveTo(waistX + skirtWidth * 0.25, skirtBottom);
+            ctx.lineTo(rKneeX, rKneeY);
+            ctx.lineTo(rAnkleX, rAnkleY);
+            ctx.stroke();
+
+            // Small circles at ankles (feet)
+            const footR = headRadius * 0.18;
+            ctx.beginPath(); ctx.arc(lAnkleX, lAnkleY, footR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(rAnkleX, rAnkleY, footR, 0, Math.PI * 2); ctx.fill();
+
+            // Reset
+            ctx.globalAlpha = 1.0;
+            ctx.shadowBlur = 0;
         }
         
         function toggleFullscreen() {
