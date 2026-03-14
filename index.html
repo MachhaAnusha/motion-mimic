@@ -678,14 +678,31 @@
             inkCanvas = document.createElement('canvas');
             inkCtx = inkCanvas.getContext('2d');
             
-            // Initialize MediaPipe
             initializeMediaPipe();
-            
-            // Setup event listeners
             setupEventListeners();
-            
-            // Start render loop
             requestAnimationFrame(render);
+        }
+        
+        function hslToRgb(h, s, l) {
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l;
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1/6) return p + (q-p)*6*t;
+                    if (t < 1/2) return q;
+                    if (t < 2/3) return p + (q-p)*(2/3-t)*6;
+                    return p;
+                };
+                const q = l < 0.5 ? l*(1+s) : l+s-l*s;
+                const p = 2*l - q;
+                r = hue2rgb(p, q, h + 1/3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1/3);
+            }
+            return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
         }
         
         function resizeCanvas() {
@@ -2506,11 +2523,8 @@
             maskedCanvas.height = PROCESSING_HEIGHT;
             const maskedCtx = maskedCanvas.getContext('2d', { willReadFrequently: true });
             
-            // Mirror the video horizontally
-            maskedCtx.save();
-            maskedCtx.scale(-1, 1);
-            maskedCtx.drawImage(video, -PROCESSING_WIDTH, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
-            maskedCtx.restore();
+            // Draw video frame normally
+            maskedCtx.drawImage(video, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
             
             // MediaPipe Selfie Segmentation returns an ImageBitmap/HTMLCanvasElement
             // Draw the mask to a temp canvas first, then read its pixel data
@@ -2519,11 +2533,8 @@
             maskCanvas.height = PROCESSING_HEIGHT;
             const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
             
-            // Mirror the mask canvas the same way
-            maskCtx.save();
-            maskCtx.scale(-1, 1);
-            maskCtx.drawImage(mask, -PROCESSING_WIDTH, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
-            maskCtx.restore();
+            // Draw mask normally
+            maskCtx.drawImage(mask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
             
             // Get mask pixel data from the red channel (mask is grayscale)
             const maskImageData = maskCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
@@ -2553,151 +2564,180 @@
         }
         
         function detectExactHumanEdges(maskedCanvas) {
-            const ctx = maskedCanvas.getContext('2d');
-            const imageData = ctx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            const maskCtx = maskedCanvas.getContext('2d');
+            const imageData = maskCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
             const data = imageData.data;
-            const edges = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
-            
-            // Use luminance of video pixels (not alpha) for internal detail
-            // This captures face details, hair texture, clothing wrinkles, jewelry
-            const gray = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
+            const W = PROCESSING_WIDTH, H = PROCESSING_HEIGHT;
+
+            // Build alpha mask and grayscale — only inside person
+            const alpha = new Uint8ClampedArray(W * H);
+            const gray  = new Float32Array(W * H);
             for (let i = 0; i < data.length; i += 4) {
                 const idx = i / 4;
-                if (data[i + 3] > 0) { // only inside the mask
-                    gray[idx] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-                } else {
-                    gray[idx] = 0;
+                alpha[idx] = data[i + 3];
+                if (data[i + 3] > 128) {
+                    gray[idx] = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
                 }
             }
-            
-            // Sobel edge detection on luminance for fine details
-            const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-            const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-            
-            for (let y = 1; y < PROCESSING_HEIGHT - 1; y++) {
-                for (let x = 1; x < PROCESSING_WIDTH - 1; x++) {
-                    const idx = y * PROCESSING_WIDTH + x;
-                    
-                    let gx = 0;
-                    let gy = 0;
-                    
-                    // Apply Sobel operator on luminance
+
+            // Light Gaussian blur — just enough to kill single-pixel camera noise
+            // but NOT enough to destroy fine details like eyebrows, hair strands, necklace
+            const blurred = new Float32Array(W * H);
+            const gk = [1,2,1, 2,4,2, 1,2,1];
+            for (let y = 1; y < H-1; y++) {
+                for (let x = 1; x < W-1; x++) {
+                    if (alpha[y*W+x] < 128) continue;
+                    let sum = 0, weight = 0;
                     for (let ky = -1; ky <= 1; ky++) {
                         for (let kx = -1; kx <= 1; kx++) {
-                            const kidx = (y + ky) * PROCESSING_WIDTH + (x + kx);
-                            const kernelIdx = (ky + 1) * 3 + (kx + 1);
-                            
-                            gx += gray[kidx] * sobelX[kernelIdx];
-                            gy += gray[kidx] * sobelY[kernelIdx];
+                            const nidx = (y+ky)*W+(x+kx);
+                            if (alpha[nidx] > 64) {
+                                const w = gk[(ky+1)*3+(kx+1)];
+                                sum += gray[nidx] * w;
+                                weight += w;
+                            }
                         }
                     }
-                    
-                    const magnitude = Math.sqrt(gx * gx + gy * gy);
-                    // Lower threshold to 15 to catch fine details like hair and jewelry
-                    edges[idx] = magnitude > 15 ? 255 : 0;
+                    blurred[y*W+x] = weight > 0 ? sum/weight : 0;
                 }
             }
-            
-            return edges;
+
+            // Sobel edge detection — only inside the person mask
+            const sobelX = [-1,0,1,-2,0,2,-1,0,1];
+            const sobelY = [-1,-2,-1,0,0,0,1,2,1];
+            const magnitude = new Float32Array(W * H);
+            let maxMag = 1;
+
+            for (let y = 1; y < H-1; y++) {
+                for (let x = 1; x < W-1; x++) {
+                    const idx = y*W+x;
+                    if (alpha[idx] < 128) continue;
+                    let gx = 0, gy = 0;
+                    for (let ky = -1; ky <= 1; ky++) {
+                        for (let kx = -1; kx <= 1; kx++) {
+                            const k = (ky+1)*3+(kx+1);
+                            const v = blurred[(y+ky)*W+(x+kx)];
+                            gx += v * sobelX[k];
+                            gy += v * sobelY[k];
+                        }
+                    }
+                    magnitude[idx] = Math.sqrt(gx*gx + gy*gy);
+                    if (magnitude[idx] > maxMag) maxMag = magnitude[idx];
+                }
+            }
+
+            // Force silhouette boundary as maximum strength edge
+            for (let y = 1; y < H-1; y++) {
+                for (let x = 1; x < W-1; x++) {
+                    const idx = y*W+x;
+                    if (alpha[idx] < 128) continue;
+                    const isBoundary =
+                        alpha[(y-1)*W+x] < 128 || alpha[(y+1)*W+x] < 128 ||
+                        alpha[y*W+(x-1)] < 128 || alpha[y*W+(x+1)] < 128;
+                    if (isBoundary) magnitude[idx] = maxMag;
+                }
+            }
+
+            // LOW threshold — keep top 85% of edges to preserve all fine details
+            // (eyebrows, eyelids, nose bridge, lip lines, hair strands, necklace, fabric folds)
+            // Only the bottom 15% absolute weakest edges (camera sensor noise) are removed
+            const threshold = maxMag * 0.15;
+            const edges = new Uint8ClampedArray(W * H);
+            for (let i = 0; i < W*H; i++) {
+                edges[i] = magnitude[i] > threshold ? 255 : 0;
+            }
+
+            // Remove only truly isolated single pixels (0 edge neighbours)
+            // Do NOT require 2 neighbours — that would kill thin hair strands and fine lines
+            const cleaned = new Uint8ClampedArray(W * H);
+            for (let y = 1; y < H-1; y++) {
+                for (let x = 1; x < W-1; x++) {
+                    const idx = y*W+x;
+                    if (!edges[idx]) continue;
+                    let n = 0;
+                    for (let dy = -1; dy <= 1; dy++)
+                        for (let dx = -1; dx <= 1; dx++)
+                            if ((dx||dy) && edges[(y+dy)*W+(x+dx)]) n++;
+                    if (n >= 1) cleaned[idx] = 255; // keep if at least 1 neighbour
+                }
+            }
+
+            return cleaned;
         }
         
         function renderExactHumanNeonOutline() {
             if (!currentEdges) return;
-            
-            // Clear canvas efficiently
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Multi-color neon gradient animation (Bharatanatyam style)
-            const time = performance.now() * 0.001;
-            const colors = [
-                [255, 0, 255],   // Magenta (top)
-                [138, 43, 226],  // Purple
-                [0, 255, 255],   // Cyan
-                [0, 255, 127],   // Green
-                [255, 255, 0]    // Yellow (bottom)
-            ];
-            
-            // Scale to full canvas
-            const scaleX = canvas.width / PROCESSING_WIDTH;
-            const scaleY = canvas.height / PROCESSING_HEIGHT;
-            
-            // Create offscreen canvas for fast rendering
-            const offscreenCanvas = document.createElement('canvas');
-            offscreenCanvas.width = canvas.width;
-            offscreenCanvas.height = canvas.height;
-            const offCtx = offscreenCanvas.getContext('2d');
-            
-            // Create ImageData for edge pixels
-            const imageData = offCtx.createImageData(canvas.width, canvas.height);
-            const data = imageData.data;
-            
-            // Color all edge pixels in memory (fast!)
-            for (let y = 0; y < PROCESSING_HEIGHT; y++) {
-                for (let x = 0; x < PROCESSING_WIDTH; x++) {
-                    const idx = y * PROCESSING_WIDTH + x;
-                    
-                    if (currentEdges[idx] > 0) {
-                        // Map to screen coordinates
-                        const screenX = Math.floor(x * scaleX);
-                        const screenY = Math.floor(y * scaleY);
-                        
-                        // Bharatanatyam-style color mapping based on Y coordinate
-                        const yRatio = y / PROCESSING_HEIGHT;
-                        let colorIndex;
-                        if (yRatio < 0.2) colorIndex = 4; // Yellow (bottom)
-                        else if (yRatio < 0.4) colorIndex = 3; // Green
-                        else if (yRatio < 0.6) colorIndex = 2; // Cyan
-                        else if (yRatio < 0.8) colorIndex = 1; // Purple
-                        else colorIndex = 0; // Magenta (top)
-                        
-                        // Animate color slightly
-                        const animatedColorIndex = (colorIndex + Math.floor(time)) % colors.length;
-                        const [r, g, b] = colors[animatedColorIndex];
-                        
-                        // Set pixel color
-                        const pixelIdx = (screenY * canvas.width + screenX) * 4;
-                        data[pixelIdx] = r;
-                        data[pixelIdx + 1] = g;
-                        data[pixelIdx + 2] = b;
-                        data[pixelIdx + 3] = 255;
-                    }
+
+            const W = PROCESSING_WIDTH, H = PROCESSING_HEIGHT;
+            const cw = canvas.width, ch = canvas.height;
+
+            // Build a full-size colored edge ImageData directly at canvas resolution
+            // This is the FASTEST approach — one putImageData + two drawImage calls
+            // No per-stroke loop, no thousands of ctx.stroke() calls killing FPS
+            const edgeImg = new ImageData(W, H);
+            const ed = edgeImg.data;
+
+            for (let y = 0; y < H; y++) {
+                // Smooth HSL gradient: magenta (300) at top → yellow (60) at bottom
+                const t = y / H;
+                const hue = (1 - t) * 300 + t * 60;
+                // Convert HSL to RGB inline for speed (no function call overhead)
+                const h6 = hue / 60;
+                const s = 1.0, l = 0.65;
+                const C = (1 - Math.abs(2*l - 1)) * s;
+                const X = C * (1 - Math.abs(h6 % 2 - 1));
+                const m = l - C/2;
+                let rr=0, gg=0, bb=0;
+                if      (h6 < 1) { rr=C; gg=X; bb=0; }
+                else if (h6 < 2) { rr=X; gg=C; bb=0; }
+                else if (h6 < 3) { rr=0; gg=C; bb=X; }
+                else if (h6 < 4) { rr=0; gg=X; bb=C; }
+                else if (h6 < 5) { rr=X; gg=0; bb=C; }
+                else             { rr=C; gg=0; bb=X; }
+                const cr = Math.round((rr+m)*255);
+                const cg = Math.round((gg+m)*255);
+                const cb = Math.round((bb+m)*255);
+
+                for (let x = 0; x < W; x++) {
+                    const idx = y*W+x;
+                    if (!currentEdges[idx]) continue;
+                    const p = idx*4;
+                    ed[p]   = cr;
+                    ed[p+1] = cg;
+                    ed[p+2] = cb;
+                    ed[p+3] = 255;
                 }
             }
-            
-            // Put colored pixels to offscreen canvas
-            offCtx.putImageData(imageData, 0, 0);
-            
-            // Draw with smooth neon glow using shadowBlur (not CSS blur)
-            const neonColors = ['#FF00FF', '#8A2BE2', '#00FFFF', '#00FF7F', '#FFFF00'];
-            const baseColor = neonColors[Math.floor(time) % neonColors.length];
-            
-            // Layer 1: Outer glow
-            ctx.shadowColor = baseColor;
-            ctx.shadowBlur = 40;
-            ctx.globalAlpha = 0.4;
-            ctx.drawImage(offscreenCanvas, 0, 0);
-            
-            // Layer 2: Middle glow
-            ctx.shadowColor = baseColor;
-            ctx.shadowBlur = 20;
+
+            // Draw to small offscreen canvas
+            const small = document.createElement('canvas');
+            small.width = W; small.height = H;
+            small.getContext('2d').putImageData(edgeImg, 0, 0);
+
+            // Mirror horizontally to match PiP video (which has CSS scaleX(-1))
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.translate(-cw, 0);
+
+            // Layer 1: wide neon glow
+            ctx.filter = 'blur(6px)';
             ctx.globalAlpha = 0.6;
-            ctx.drawImage(offscreenCanvas, 0, 0);
-            
-            // Layer 3: Inner glow
-            ctx.shadowColor = baseColor;
-            ctx.shadowBlur = 8;
+            ctx.drawImage(small, 0, 0, cw, ch);
+
+            // Layer 2: medium glow
+            ctx.filter = 'blur(3px)';
             ctx.globalAlpha = 0.8;
-            ctx.drawImage(offscreenCanvas, 0, 0);
-            
-            // Layer 4: Sharp core
-            ctx.shadowColor = baseColor;
-            ctx.shadowBlur = 0;
+            ctx.drawImage(small, 0, 0, cw, ch);
+
+            // Layer 3: sharp crisp core
+            ctx.filter = 'none';
             ctx.globalAlpha = 1.0;
-            ctx.drawImage(offscreenCanvas, 0, 0);
-            
-            // Reset shadow settings
-            ctx.shadowBlur = 0;
+            ctx.drawImage(small, 0, 0, cw, ch);
+
+            ctx.filter = 'none';
             ctx.globalAlpha = 1.0;
+            ctx.restore();
         }
         
         function getConnectedEdges(edges, x, y, width, height) {
