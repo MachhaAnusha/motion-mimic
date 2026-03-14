@@ -362,6 +362,12 @@
             <span class="shortcut">4</span>
         </button>
         
+        <button class="filter-btn" data-filter="4">
+            <span class="emoji">✨</span>
+            <span>Stardust Man</span>
+            <span class="shortcut">5</span>
+        </button>
+        
         <div class="top-controls">
             <button class="camera-toggle off" id="cameraToggle">
                 📷 Camera OFF
@@ -775,7 +781,7 @@
                     console.log(`Filter button clicked: ${filterIndex} - "${buttonText}" - data-filter: ${newBtn.dataset.filter}`);
                     
                     // Validate the filter index
-                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 3) {
+                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 4) {
                         console.error(`Invalid filter index: ${filterIndex}`);
                         return;
                     }
@@ -827,6 +833,7 @@
                     case '2': switchFilter(1); break;  // Stick Man
                     case '3': switchFilter(2); break;  // Neon Human Outline
                     case '4': switchFilter(3); break;  // Silk Stream
+                    case '5': switchFilter(4); break;  // Stardust Man
                     case 'f': case 'F':
                         toggleFullscreen();
                         break;
@@ -1068,7 +1075,7 @@
                                 }
                                 
                                 // Run selfie segmentation for Neon Human Outline filter
-                                if (selfieSegmentation && cameraOn && currentFilter === 2) {
+                                if (selfieSegmentation && cameraOn && (currentFilter === 2 || currentFilter === 4)) {
                                     try {
                                         await selfieSegmentation.send({ image: video });
                                     } catch (error) {
@@ -1268,6 +1275,7 @@
                     case 0: renderNeonSpecter(); break;
                     case 1: renderStickMan(); break;
                     case 3: renderSilkStream(); break;
+                    case 4: renderStardustMan(); break;
                 }
             }
             
@@ -4134,6 +4142,204 @@
             
             // Draw all layers
             ctx.drawImage(videoCanvas, 0, 0); // Bottom layer
+        }
+        
+        // FILTER 5: STARDUST MAN - PARTICLE BODY WITH VELOCITY TRAILS
+        const STARDUST_CONFIG = {
+            particleCount: 2500,
+            particleSize: 1.6,
+            explosionThreshold: 7,
+            explosionParticlesPerFrame: 15,
+            explosionMaxParticles: 1000,
+            explosionLife: 80,
+            explosionSpeed: 5,
+            explosionSize: 2.2,
+            colors: [
+                { r: 255, g: 255, b: 255, weight: 5 },
+                { r: 255, g: 230, b: 150, weight: 3 },
+                { r: 180, g: 220, b: 255, weight: 3 },
+                { r: 255, g: 200, b: 80,  weight: 2 },
+                { r: 120, g: 180, b: 255, weight: 1 },
+            ]
+        };
+
+        let stardustExplosionParticles = [];
+        let stardustPrevJoints = {};
+        let stardustFrameCount = 0;
+        let stardustMaskCanvas = null;
+        let stardustMaskCtx = null;
+        let stardustMaskPixels = [];
+        let stardustLastMaskUpdate = 0;
+
+        function getStardustColor() {
+            const totalWeight = STARDUST_CONFIG.colors.reduce((s, c) => s + c.weight, 0);
+            let r = Math.random() * totalWeight;
+            for (const c of STARDUST_CONFIG.colors) {
+                r -= c.weight;
+                if (r <= 0) return c;
+            }
+            return STARDUST_CONFIG.colors[0];
+        }
+
+        function updateStardustMaskPixels(mask) {
+            // Draw the segmentation mask to a tiny canvas and collect all "person" pixel positions
+            if (!stardustMaskCanvas) {
+                stardustMaskCanvas = document.createElement('canvas');
+                stardustMaskCtx = stardustMaskCanvas.getContext('2d', { willReadFrequently: true });
+            }
+            const SW = 160, SH = 120;
+            stardustMaskCanvas.width = SW;
+            stardustMaskCanvas.height = SH;
+
+            // Draw mirrored to match display orientation
+            stardustMaskCtx.save();
+            stardustMaskCtx.scale(-1, 1);
+            stardustMaskCtx.drawImage(mask, -SW, 0, SW, SH);
+            stardustMaskCtx.restore();
+
+            const imgData = stardustMaskCtx.getImageData(0, 0, SW, SH);
+            const data = imgData.data;
+            const pixels = [];
+            const cw = canvas.width, ch = canvas.height;
+            const scaleX = cw / SW, scaleY = ch / SH;
+
+            for (let y = 0; y < SH; y++) {
+                for (let x = 0; x < SW; x++) {
+                    const idx = (y * SW + x) * 4;
+                    // red channel > 180 = high confidence person pixel
+                    if (data[idx] > 180) {
+                        pixels.push({ x: x * scaleX, y: y * scaleY });
+                    }
+                }
+            }
+            stardustMaskPixels = pixels;
+        }
+
+        function renderStardustMan() {
+            if (!smoothedLandmarks || smoothedLandmarks.length < 29) return;
+            stardustFrameCount++;
+            const lm = smoothedLandmarks;
+            const cw = canvas.width, ch = canvas.height;
+
+            // Refresh mask pixel list every frame when segmentation is available
+            if (segmentationMask && stardustFrameCount !== stardustLastMaskUpdate) {
+                updateStardustMaskPixels(segmentationMask);
+                stardustLastMaskUpdate = stardustFrameCount;
+            }
+
+            // --- STEP 1: Detect fast joints and spawn explosion particles ---
+            const trackedJoints = [0,11,12,13,14,15,16,23,24,25,26,27,28];
+            trackedJoints.forEach(ji => {
+                const lmj = lm[ji];
+                if (!lmj) return;
+                const cx = lmj.x * cw, cy = lmj.y * ch;
+                const mx = cw - cx; // mirror x to match display
+                const prev = stardustPrevJoints[ji];
+                if (prev) {
+                    const vx = mx - prev.x;
+                    const vy = cy - prev.y;
+                    const speed = Math.sqrt(vx*vx + vy*vy);
+                    if (speed > STARDUST_CONFIG.explosionThreshold) {
+                        const count = Math.min(
+                            STARDUST_CONFIG.explosionParticlesPerFrame,
+                            STARDUST_CONFIG.explosionMaxParticles - stardustExplosionParticles.length
+                        );
+                        for (let i = 0; i < count; i++) {
+                            const spread = (Math.random() - 0.5) * Math.PI * 0.9;
+                            const angle = Math.atan2(vy, vx) + spread + Math.PI;
+                            const spd = (0.5 + Math.random()) * STARDUST_CONFIG.explosionSpeed * (speed / 25);
+                            const col = getStardustColor();
+                            stardustExplosionParticles.push({
+                                x: mx + (Math.random()-0.5)*14,
+                                y: cy + (Math.random()-0.5)*14,
+                                vx: Math.cos(angle) * spd,
+                                vy: Math.sin(angle) * spd,
+                                life: STARDUST_CONFIG.explosionLife,
+                                maxLife: STARDUST_CONFIG.explosionLife,
+                                size: STARDUST_CONFIG.explosionSize * (0.4 + Math.random() * 0.8),
+                                r: col.r, g: col.g, b: col.b
+                            });
+                        }
+                    }
+                }
+                stardustPrevJoints[ji] = { x: mx, y: cy };
+            });
+
+            // --- STEP 2: Update explosion particles physics ---
+            for (let i = stardustExplosionParticles.length - 1; i >= 0; i--) {
+                const p = stardustExplosionParticles[i];
+                p.x += p.vx; p.y += p.vy;
+                p.vx *= 0.94; p.vy *= 0.94;
+                p.vy += 0.05; // gravity
+                p.life--;
+                if (p.life <= 0) stardustExplosionParticles.splice(i, 1);
+            }
+
+            // --- STEP 3: Draw explosion particles behind body ---
+            stardustExplosionParticles.forEach(p => {
+                const alpha = p.life / p.maxLife;
+                const size = p.size * (0.3 + alpha * 0.7);
+                ctx.globalAlpha = alpha * 0.85;
+                ctx.fillStyle = `rgb(${p.r},${p.g},${p.b})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+                ctx.fill();
+                if (alpha > 0.4) {
+                    ctx.globalAlpha = alpha * 0.2;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, size * 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // --- STEP 4: Draw body fill particles from segmentation mask pixels ---
+            if (stardustMaskPixels.length > 0) {
+                const total = stardustMaskPixels.length;
+                for (let i = 0; i < STARDUST_CONFIG.particleCount; i++) {
+                    // Pick random position from confirmed body pixels
+                    const pt = stardustMaskPixels[Math.floor(Math.random() * total)];
+                    // Small jitter so particles don't sit exactly on pixel grid
+                    const jx = pt.x + (Math.random() - 0.5) * 6;
+                    const jy = pt.y + (Math.random() - 0.5) * 6;
+                    const col = getStardustColor();
+                    const flicker = 0.4 + Math.random() * 0.6;
+                    const size = STARDUST_CONFIG.particleSize * (0.3 + Math.random() * 0.9);
+                    // Bright core
+                    ctx.globalAlpha = flicker * 0.95;
+                    ctx.fillStyle = `rgb(${col.r},${col.g},${col.b})`;
+                    ctx.beginPath();
+                    ctx.arc(jx, jy, size, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Soft star halo on brighter particles
+                    if (flicker > 0.7) {
+                        ctx.globalAlpha = flicker * 0.15;
+                        ctx.beginPath();
+                        ctx.arc(jx, jy, size * 3.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // --- STEP 5: Joint hotspot glow ---
+            trackedJoints.forEach(ji => {
+                const lmj = lm[ji];
+                if (!lmj) return;
+                const x = cw - lmj.x * cw; // mirrored
+                const y = lmj.y * ch;
+                for (let i = 0; i < 14; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const r = Math.random() * 14;
+                    const col = getStardustColor();
+                    ctx.globalAlpha = 0.5 + Math.random() * 0.5;
+                    ctx.fillStyle = `rgb(${col.r},${col.g},${col.b})`;
+                    ctx.beginPath();
+                    ctx.arc(x + Math.cos(angle)*r, y + Math.sin(angle)*r,
+                            1.0 + Math.random()*1.8, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            });
+
+            ctx.globalAlpha = 1.0;
         }
         
         function toggleFullscreen() {
