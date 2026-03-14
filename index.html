@@ -374,6 +374,12 @@
             <span class="shortcut">6</span>
         </button>
         
+        <button class="filter-btn" data-filter="6">
+            <span class="emoji">🟦</span>
+            <span>Voxel Cloud</span>
+            <span class="shortcut">7</span>
+        </button>
+        
         <div class="top-controls">
             <button class="camera-toggle off" id="cameraToggle">
                 📷 Camera OFF
@@ -642,6 +648,8 @@
             segmentationCompleted = false;
             currentEdges = null;
             
+            resetVoxelCloud();
+            
             console.log("Filter data reset - all particles and trails cleared");
         }
         
@@ -787,7 +795,7 @@
                     console.log(`Filter button clicked: ${filterIndex} - "${buttonText}" - data-filter: ${newBtn.dataset.filter}`);
                     
                     // Validate the filter index
-                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 5) {
+                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 6) {
                         console.error(`Invalid filter index: ${filterIndex}`);
                         return;
                     }
@@ -841,6 +849,7 @@
                     case '4': switchFilter(3); break;  // Silk Stream
                     case '5': switchFilter(4); break;  // Stardust Man
                     case '6': switchFilter(5); break;  // Warli Art
+                    case '7': switchFilter(6); break;  // Voxel Cloud
                     case 'f': case 'F':
                         toggleFullscreen();
                         break;
@@ -1082,7 +1091,7 @@
                                 }
                                 
                                 // Run selfie segmentation for Neon Human Outline filter
-                                if (selfieSegmentation && cameraOn && (currentFilter === 2 || currentFilter === 4)) {
+                                if (selfieSegmentation && cameraOn && (currentFilter === 2 || currentFilter === 4 || currentFilter === 6)) {
                                     try {
                                         await selfieSegmentation.send({ image: video });
                                     } catch (error) {
@@ -1277,6 +1286,8 @@
             // Always render Neon Human Outline regardless of pose detection
             if (currentFilter === 2) {
                 renderNeonHumanOutline();
+            } else if (currentFilter === 6) {
+                renderDigitalVoxelCloud();       // ← ADD THIS BRANCH
             } else if (smoothedLandmarks.length > 0) {
                 switch (currentFilter) {
                     case 0: renderNeonSpecter(); break;
@@ -4178,6 +4189,15 @@
         let stardustMaskPixels = [];
         let stardustLastMaskUpdate = 0;
 
+        let voxelParticles = [];
+        const VOXEL_SIZE       = 5;      // smaller cubes for less intensity
+        const VOXEL_SPAWN_RATE = 200;    // reduced spawn rate
+        const VOXEL_MAX        = 8000;   // lower cap for less dense cloud
+
+        // Dedicated offscreen canvas for reading the segmentation mask cleanly
+        let voxelMaskCanvas = null;
+        let voxelMaskCtx    = null;
+
         function getStardustColor() {
             const totalWeight = STARDUST_CONFIG.colors.reduce((s, c) => s + c.weight, 0);
             let r = Math.random() * totalWeight;
@@ -4618,6 +4638,231 @@
         
         // Initialize when page loads
         window.addEventListener('load', init);
+        
+        // ============================================================
+        // FILTER 7: DIGITAL VOXEL CLOUD
+        // ============================================================
+
+        function resetVoxelCloud() {
+            voxelParticles  = [];
+            voxelMaskCanvas = null;
+            voxelMaskCtx    = null;
+        }
+
+        // Build (or reuse) a dedicated small canvas for reading the mask
+        function getVoxelMaskCtx() {
+            if (!voxelMaskCanvas) {
+                voxelMaskCanvas = document.createElement('canvas');
+                voxelMaskCanvas.width  = PROCESSING_WIDTH;
+                voxelMaskCanvas.height = PROCESSING_HEIGHT;
+                voxelMaskCtx = voxelMaskCanvas.getContext('2d', { willReadFrequently: true });
+            }
+            return voxelMaskCtx;
+        }
+
+        // Read the MediaPipe segmentation mask correctly.
+        // MediaPipe Selfie Segmentation stores person probability in the RED channel (0-255).
+        // Threshold > 128 means "person pixel".
+        // DO NOT use alpha — it is always 255 on any drawn canvas and carries no info.
+        function buildVoxelSilhouette() {
+            const mctx = getVoxelMaskCtx();
+            mctx.clearRect(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            mctx.drawImage(segmentationMask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            const imgData = mctx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            return imgData.data; // person pixels have RED channel > 128
+        }
+
+        function renderDigitalVoxelCloud() {
+            const cw = canvas.width;
+            const ch = canvas.height;
+
+            // ── BACKGROUND ───────────────────────────────────────────
+            // Dark charcoal (matches reference image, not pure black)
+            ctx.fillStyle = '#111318';
+            ctx.fillRect(0, 0, cw, ch);
+
+            // Faint cyan grid — gives the depth-camera / Kinect feel
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.045)';
+            ctx.lineWidth = 1;
+            const gridStep = 30;
+            for (let gx = 0; gx < cw; gx += gridStep) {
+                ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, ch); ctx.stroke();
+            }
+            for (let gy = 0; gy < ch; gy += gridStep) {
+                ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(cw, gy); ctx.stroke();
+            }
+
+            // ── HAND HEIGHT → COLOR RATIO ────────────────────────────
+            // 0.0 = hands down → Cyan (#00FFFF)
+            // 1.0 = hands raised above shoulders → Electric Purple (#BF00FF)
+            let handRatio = 0;
+            if (smoothedLandmarks.length > 0) {
+                const lWristY    = smoothedLandmarks[15]?.y ?? 0.8;
+                const rWristY    = smoothedLandmarks[16]?.y ?? 0.8;
+                const lShoulderY = smoothedLandmarks[11]?.y ?? 0.4;
+                const rShoulderY = smoothedLandmarks[12]?.y ?? 0.4;
+                const avgHandY     = (lWristY + rWristY) / 2;
+                const avgShoulderY = (lShoulderY + rShoulderY) / 2;
+                // Lower Y value = higher on screen
+                handRatio = Math.max(0, Math.min(1,
+                    (avgShoulderY - avgHandY) / Math.max(avgShoulderY, 0.01)
+                ));
+            }
+
+            // Interpolate base RGB: Cyan → Electric Purple
+            const baseR = Math.round(lerp(0,   191, handRatio));
+            const baseG = Math.round(lerp(255,   0, handRatio));
+            const baseB = 255;
+
+            // ── SPAWN NEW VOXELS ──────────────────────────────────────
+            if (segmentationMask) {
+                // ✅ Read RED channel — that's where MediaPipe stores person probability
+                const rawMask = buildVoxelSilhouette();
+
+                // Pre-scan valid silhouette pixels (sample every 3rd pixel for speed)
+                const SAMPLE_STRIDE = 3;
+                const validPixels = [];
+                for (let py = 0; py < PROCESSING_HEIGHT; py += SAMPLE_STRIDE) {
+                    for (let px = 0; px < PROCESSING_WIDTH; px += SAMPLE_STRIDE) {
+                        const idx = (py * PROCESSING_WIDTH + px) * 4;
+                        if (rawMask[idx] > 128) {          // ✅ RED channel, not alpha
+                            validPixels.push(px, py);
+                        }
+                    }
+                }
+
+                const totalValid = validPixels.length / 2;
+                if (totalValid > 0) {
+                    const toSpawn = Math.min(VOXEL_SPAWN_RATE, totalValid);
+                    for (let s = 0; s < toSpawn; s++) {
+                        const pick = Math.floor(Math.random() * totalValid) * 2;
+                        const px   = validPixels[pick];
+                        const py   = validPixels[pick + 1];
+                        // Mirror X (selfie camera), map to canvas resolution
+                        const cx2  = cw - (px / PROCESSING_WIDTH)  * cw;
+                        const cy2  =      (py / PROCESSING_HEIGHT) * ch;
+                        // Slight per-voxel colour variation for organic look
+                        const v    = (Math.random() - 0.5) * 35;
+                        spawnVoxel(
+                            cx2, cy2,
+                            Math.max(0, Math.min(255, baseR + v)),
+                            Math.max(0, Math.min(255, baseG + v)),
+                            baseB
+                        );
+                    }
+                }
+            } else if (smoothedLandmarks.length > 0) {
+                // FALLBACK: scatter inside pose bounding box when mask not yet ready
+                const xs = smoothedLandmarks.map(l => (1 - l.x) * cw);
+                const ys = smoothedLandmarks.map(l =>       l.y  * ch);
+                const minX = Math.min(...xs), maxX = Math.max(...xs);
+                const minY = Math.min(...ys), maxY = Math.max(...ys);
+                for (let s = 0; s < VOXEL_SPAWN_RATE; s++) {
+                    const cx2 = minX + Math.random() * (maxX - minX);
+                    const cy2 = minY + Math.random() * (maxY - minY);
+                    spawnVoxel(cx2, cy2, baseR, baseG, baseB);
+                }
+            }
+
+            // Hard cap — drop oldest voxels to maintain performance
+            if (voxelParticles.length > VOXEL_MAX) {
+                voxelParticles.splice(0, voxelParticles.length - VOXEL_MAX);
+            }
+
+            // ── UPDATE & DRAW ALL VOXELS ──────────────────────────────
+            const surviving = [];
+
+            for (let i = 0; i < voxelParticles.length; i++) {
+                const v = voxelParticles[i];
+
+                // Physics
+                v.x  += v.vx;
+                v.y  += v.vy;
+                v.vy -= 0.035;                          // buoyancy (upward acceleration)
+                v.vx += (Math.random() - 0.5) * 0.05;  // lateral wobble
+                v.vx *= 0.97;                           // dampen drift over time
+                v.life -= v.decay;
+
+                if (v.life <= 0) continue; // discard dead voxel
+
+                const alpha = Math.min(1, v.life) * 0.9;
+                const s = v.size;
+                const half = s / 2;
+
+                // ── DRAW: 3-face voxel illusion ──────────────────────
+                // Face 1: Front face (reduced brightness)
+                ctx.globalAlpha = alpha * 0.7;  // reduced overall opacity
+                ctx.shadowBlur  = 6;           // smaller glow
+                ctx.shadowColor = `rgba(${v.r}, ${v.g}, ${v.b}, 0.4)`;  // dimmer shadow
+                ctx.fillStyle   = `rgb(${v.r}, ${v.g}, ${v.b})`;
+                ctx.fillRect(v.x - half, v.y - half, s, s);
+
+                // Face 2: Top shading (reduced brightness)
+                ctx.shadowBlur = 0;
+                ctx.fillStyle  = `rgba(255, 255, 255, ${alpha * 0.15})`;  // dimmer top
+                ctx.fillRect(v.x - half, v.y - half, s, s * 0.3);
+
+                // Face 3: Right-side shading (reduced darkness)
+                ctx.fillStyle  = `rgba(0, 0, 0, ${alpha * 0.25})`;  // lighter shadow
+                ctx.fillRect(v.x + half - s * 0.3, v.y - half, s * 0.3, s);
+
+                // Bright core pixel (reduced intensity)
+                ctx.fillStyle  = `rgba(255, 255, 255, ${alpha * 0.35})`;  // dimmer core
+                const coreSize = s * 0.25;  // smaller core
+                ctx.fillRect(
+                    v.x - coreSize / 2,
+                    v.y - coreSize / 2,
+                    coreSize, coreSize
+                );
+
+                surviving.push(v);
+            }
+
+            voxelParticles = surviving;
+
+            // Reset canvas state
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur  = 0;
+
+            // ── HUD: Color Shift Indicator Bar ───────────────────────
+            // Small gradient bar at bottom center showing current Cyan↔Purple position
+            const barW = 180, barH = 8;
+            const barX = cw / 2 - barW / 2;
+            const barY = ch - 30;
+
+            const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+            grad.addColorStop(0, '#00FFFF');
+            grad.addColorStop(1, '#BF00FF');
+
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle   = grad;
+            ctx.fillRect(barX, barY, barW, barH);
+
+            // White dot indicator at current hand position
+            ctx.fillStyle = '#FFFFFF';
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = '#fff';
+            ctx.beginPath();
+            ctx.arc(barX + handRatio * barW, barY + barH / 2, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur  = 0;
+        }
+
+        function spawnVoxel(x, y, r, g, b) {
+            voxelParticles.push({
+                x, y,
+                vx:    (Math.random() - 0.5) * 0.4,    // reduced velocity
+                vy:    -(Math.random() * 0.2),        // less upward movement
+                size:  VOXEL_SIZE * (0.4 + Math.random() * 0.6),  // smaller size range
+                life:  0.7 + Math.random() * 0.4,     // shorter life
+                decay: 0.005 + Math.random() * 0.008,  // faster decay
+                r: Math.round(r),
+                g: Math.round(g),
+                b: Math.round(b)
+            });
+        }
     </script>
 </body>
 </html>
