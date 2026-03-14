@@ -563,6 +563,7 @@
             }
         }
         
+        // MediaPipe Selfie Segmentation initialization (disabled for Neon Human Outline)
         function initializeMediaPipe() {
             // Initialize Pose
             pose = new Pose({
@@ -572,16 +573,16 @@
             });
             
             pose.setOptions({
-                modelComplexity: 0, // Use simplest model for best performance
+                modelComplexity: 0,
                 smoothLandmarks: true,
-                minDetectionConfidence: 0.3, // Lower threshold for easier detection
-                minTrackingConfidence: 0.3, // Lower threshold for better tracking
-                enableSegmentation: false // Disable for performance
+                minDetectionConfidence: 0.3,
+                minTrackingConfidence: 0.3,
+                enableSegmentation: false
             });
             
             pose.onResults(onPoseResults);
             
-            // Initialize Hands (for Aura Bloom)
+            // Initialize Hands (for other filters)
             hands = new Hands({
                 locateFile: (file) => {
                     return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
@@ -590,25 +591,15 @@
             
             hands.setOptions({
                 maxNumHands: 2,
-                modelComplexity: 0, // Use simplest model for performance
-                minDetectionConfidence: 0.4, // Lower threshold for easier detection
-                minTrackingConfidence: 0.4 // Lower threshold for better tracking
+                modelComplexity: 0,
+                minDetectionConfidence: 0.4,
+                minTrackingConfidence: 0.4
             });
             
             hands.onResults(onHandsResults);
             
-            // Initialize Selfie Segmentation (for Aura Bloom)
-            selfieSegmentation = new SelfieSegmentation({
-                locateFile: (file) => {
-                    return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
-                }
-            });
-            
-            selfieSegmentation.setOptions({
-                modelSelection: 1
-            });
-            
-            selfieSegmentation.onResults(onSegmentationResults);
+            // Skip Selfie Segmentation to avoid WASM errors
+            console.log('✅ MediaPipe initialized (Selfie Segmentation disabled for performance)');
         }
         
         function setupEventListeners() {
@@ -2155,22 +2146,58 @@
             lastFrameTime = currentTime;
             
             try {
-                // Run segmentation only every 100ms
+                // Run segmentation only every 100ms with fallback
                 if (currentTime - lastSegmentationTime > SEGMENTATION_INTERVAL && !segmentationCompleted) {
-                    console.log('🔍 Starting segmentation...');
+                    console.log('🔍 Starting simple segmentation...');
                     const segStart = performance.now();
                     
-                    if (video && selfieSegmentation && neonOutlineCanvas) {
-                        // Draw downscaled video to processing canvas
+                    if (video && neonOutlineCanvas) {
+                        // Simple background subtraction instead of MediaPipe segmentation
                         neonOutlineCtx.drawImage(video, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
                         
-                        // Run segmentation
-                        selfieSegmentation.send({ image: neonOutlineCanvas });
+                        // Create simple mask using brightness threshold
+                        const imageData = neonOutlineCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+                        const data = imageData.data;
+                        const mask = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
+                        
+                        // Simple background subtraction (assume center is person)
+                        const centerX = PROCESSING_WIDTH / 2;
+                        const centerY = PROCESSING_HEIGHT / 2;
+                        const threshold = 30; // Brightness threshold
+                        
+                        for (let i = 0; i < data.length; i += 4) {
+                            const idx = i / 4;
+                            const x = idx % PROCESSING_WIDTH;
+                            const y = Math.floor(idx / PROCESSING_WIDTH);
+                            
+                            // Distance from center
+                            const distFromCenter = Math.sqrt(
+                                Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2)
+                            );
+                            
+                            // Brightness
+                            const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                            
+                            // Simple mask: center area + bright pixels = person
+                            if (distFromCenter < Math.min(centerX, centerY) * 0.8 && brightness > threshold) {
+                                mask[idx] = 1;
+                            } else {
+                                mask[idx] = 0;
+                                // Darken background
+                                data[i] = data[i + 1] = data[i + 2] = 0;
+                            }
+                        }
+                        
+                        neonOutlineCtx.putImageData(imageData, 0, 0);
+                        
+                        // Run edge detection on masked image
+                        const edges = runSimpleEdgeDetection(mask);
+                        currentEdges = edges;
                         segmentationCompleted = true;
                         lastSegmentationTime = currentTime;
                         
                         const segTime = performance.now() - segStart;
-                        console.log(`⏱️ Segmentation time: ${segTime.toFixed(2)}ms`);
+                        console.log(`⏱️ Simple segmentation time: ${segTime.toFixed(2)}ms`);
                     }
                 }
                 
@@ -2189,88 +2216,37 @@
             }
         }
         
-        function onSegmentationResults(results) {
-            try {
-                const edgeStart = performance.now();
-                
-                if (results.segmentationMask && neonOutlineCanvas) {
-                    segmentationMask = results.segmentationMask;
+        function runSimpleEdgeDetection(mask) {
+            const edges = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
+            
+            // Simple edge detection on mask
+            for (let y = 1; y < PROCESSING_HEIGHT - 1; y++) {
+                for (let x = 1; x < PROCESSING_WIDTH - 1; x++) {
+                    const idx = y * PROCESSING_WIDTH + x;
                     
-                    // Apply mask and run edge detection
-                    const edges = runOptimizedEdgeDetection();
-                    currentEdges = edges;
-                    segmentationCompleted = true;
+                    // Check if current pixel is different from neighbors
+                    const current = mask[idx];
+                    const neighbors = [
+                        mask[(y-1) * PROCESSING_WIDTH + (x-1)],
+                        mask[(y-1) * PROCESSING_WIDTH + x],
+                        mask[(y-1) * PROCESSING_WIDTH + (x+1)],
+                        mask[y * PROCESSING_WIDTH + (x-1)],
+                        mask[y * PROCESSING_WIDTH + (x+1)],
+                        mask[(y+1) * PROCESSING_WIDTH + (x-1)],
+                        mask[(y+1) * PROCESSING_WIDTH + x],
+                        mask[(y+1) * PROCESSING_WIDTH + (x+1)]
+                    ];
                     
-                    const edgeTime = performance.now() - edgeStart;
-                    console.log(`⚡ Edge detection time: ${edgeTime.toFixed(2)}ms`);
-                }
-            } catch (error) {
-                console.error('❌ Segmentation processing error:', error);
-                segmentationCompleted = false;
-            }
-        }
-        
-        function runOptimizedEdgeDetection() {
-            if (!neonOutlineCtx || !segmentationMask) return null;
-            
-            // Get image data
-            const imageData = neonOutlineCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
-            const data = imageData.data;
-            
-            // Apply segmentation mask
-            for (let i = 0; i < data.length; i += 4) {
-                const maskValue = segmentationMask.data[i / 4];
-                if (maskValue < 0.5) {
-                    data[i] = 0;     // R
-                    data[i + 1] = 0; // G
-                    data[i + 2] = 0; // B
-                    data[i + 3] = 255; // A
-                }
-            }
-            
-            neonOutlineCtx.putImageData(imageData, 0, 0);
-            
-            // Simplified edge detection for performance
-            return detectSimplifiedEdges(neonOutlineCtx, PROCESSING_WIDTH, PROCESSING_HEIGHT);
-        }
-        
-        function detectSimplifiedEdges(ctx, width, height) {
-            const imageData = ctx.getImageData(0, 0, width, height);
-            const data = imageData.data;
-            const edges = new Uint8ClampedArray(width * height);
-            
-            // Convert to grayscale
-            const gray = new Uint8ClampedArray(width * height);
-            for (let i = 0; i < data.length; i += 4) {
-                const idx = i / 4;
-                gray[idx] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-            }
-            
-            // Simple Sobel edge detection (optimized)
-            for (let y = 1; y < height - 1; y++) {
-                for (let x = 1; x < width - 1; x++) {
-                    const idx = y * width + x;
-                    
-                    const gx = 
-                        -gray[(y-1) * width + (x-1)] +
-                        gray[(y+1) * width + (x-1)] +
-                        -2 * (gray[(y-1) * width + x] - gray[(y+1) * width + x]) +
-                        -gray[(y-1) * width + (x+1)] +
-                        gray[(y+1) * width + (x+1)];
-                    
-                    const gy = 
-                        -gray[(y-1) * width + (x-1)] +
-                        -2 * (gray[y * width + (x-1)] - gray[y * width + (x+1)]) +
-                        -gray[(y+1) * width + (x-1)] +
-                        gray[(y+1) * width + (x+1)];
-                    
-                    const magnitude = Math.sqrt(gx * gx + gy * gy);
-                    edges[idx] = magnitude > 50 ? 255 : 0;
+                    // Edge if any neighbor is different
+                    const isEdge = neighbors.some(n => n !== current);
+                    edges[idx] = isEdge && current ? 255 : 0;
                 }
             }
             
             return edges;
         }
+        
+        // Old segmentation functions removed to prevent WASM errors
         
         function renderOptimizedNeonEdges(edges) {
             // Clear canvas efficiently
