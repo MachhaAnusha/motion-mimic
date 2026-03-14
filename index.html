@@ -2150,67 +2150,37 @@
             lastFrameTime = currentTime;
             
             try {
-                // Run segmentation only every 100ms with fallback
-                if (currentTime - lastSegmentationTime > SEGMENTATION_INTERVAL && !segmentationCompleted) {
-                    console.log('🔍 Starting simple segmentation...');
+                // Run silhouette detection every 100ms continuously
+                if (currentTime - lastSegmentationTime > SEGMENTATION_INTERVAL) {
+                    console.log('🔍 Starting silhouette detection...');
                     const segStart = performance.now();
                     
-                    if (video && neonOutlineCanvas) {
-                        // Simple background subtraction instead of MediaPipe segmentation
+                    if (video && neonOutlineCanvas && smoothedLandmarks.length > 0) {
+                        // Draw video to processing canvas
                         neonOutlineCtx.drawImage(video, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
                         
-                        // Create simple mask using brightness threshold
-                        const imageData = neonOutlineCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
-                        const data = imageData.data;
-                        const mask = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
-                        
-                        // Simple background subtraction (assume center is person)
-                        const centerX = PROCESSING_WIDTH / 2;
-                        const centerY = PROCESSING_HEIGHT / 2;
-                        const threshold = 30; // Brightness threshold
-                        
-                        for (let i = 0; i < data.length; i += 4) {
-                            const idx = i / 4;
-                            const x = idx % PROCESSING_WIDTH;
-                            const y = Math.floor(idx / PROCESSING_WIDTH);
-                            
-                            // Distance from center
-                            const distFromCenter = Math.sqrt(
-                                Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2)
-                            );
-                            
-                            // Brightness
-                            const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                            
-                            // Simple mask: center area + bright pixels = person
-                            if (distFromCenter < Math.min(centerX, centerY) * 0.8 && brightness > threshold) {
-                                mask[idx] = 1;
-                            } else {
-                                mask[idx] = 0;
-                                // Darken background
-                                data[i] = data[i + 1] = data[i + 2] = 0;
-                            }
-                        }
-                        
-                        neonOutlineCtx.putImageData(imageData, 0, 0);
-                        
-                        // Run edge detection on masked image
-                        const edges = runSimpleEdgeDetection(mask);
-                        currentEdges = edges;
-                        segmentationCompleted = true;
+                        // Create person silhouette using pose-guided background subtraction
+                        const silhouette = createPersonSilhouette();
+                        currentEdges = detectContourEdges(silhouette);
                         lastSegmentationTime = currentTime;
                         
                         const segTime = performance.now() - segStart;
-                        console.log(`⏱️ Simple segmentation time: ${segTime.toFixed(2)}ms`);
+                        console.log(`⏱️ Silhouette detection time: ${segTime.toFixed(2)}ms`);
+                        console.log(`📊 Landmarks detected: ${smoothedLandmarks.length}`);
+                    } else {
+                        console.log('⚠️ Waiting for pose detection...');
                     }
                 }
                 
-                // Render edges if segmentation completed
-                if (currentEdges && segmentationCompleted) {
+                // Render neon silhouette if ready
+                if (currentEdges) {
                     const renderStart = performance.now();
-                    renderOptimizedNeonEdges(currentEdges);
+                    renderSilhouetteNeonOutline(currentEdges);
                     const renderTime = performance.now() - renderStart;
-                    console.log(`🎨 Render time: ${renderTime.toFixed(2)}ms`);
+                    console.log(`🎨 Silhouette render time: ${renderTime.toFixed(2)}ms`);
+                } else {
+                    // Show fallback if no edges detected
+                    renderFallbackOutline();
                 }
                 
             } catch (error) {
@@ -2218,6 +2188,471 @@
                 // Fallback to simple outline mode
                 renderFallbackOutline();
             }
+        }
+        
+        function createPersonSilhouette() {
+            const imageData = neonOutlineCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            const data = imageData.data;
+            const silhouette = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
+            
+            // Simple approach: use pose landmarks to create body shape
+            if (smoothedLandmarks.length > 0) {
+                // Create filled body shape using landmarks
+                const lm = smoothedLandmarks;
+                
+                // Fill torso area
+                const leftShoulder = lm[11];
+                const rightShoulder = lm[12];
+                const leftHip = lm[23];
+                const rightHip = lm[24];
+                
+                if (leftShoulder && rightShoulder && leftHip && rightHip) {
+                    // Convert to processing coordinates
+                    const points = [
+                        { x: leftShoulder.x * PROCESSING_WIDTH, y: leftShoulder.y * PROCESSING_HEIGHT },
+                        { x: rightShoulder.x * PROCESSING_WIDTH, y: rightShoulder.y * PROCESSING_HEIGHT },
+                        { x: rightHip.x * PROCESSING_WIDTH, y: rightHip.y * PROCESSING_HEIGHT },
+                        { x: leftHip.x * PROCESSING_WIDTH, y: leftHip.y * PROCESSING_HEIGHT }
+                    ];
+                    
+                    // Fill polygon area
+                    fillPolygon(silhouette, points, PROCESSING_WIDTH);
+                    
+                    // Add limb areas
+                    addLimbArea(silhouette, lm[11], lm[13], lm[15], PROCESSING_WIDTH); // Left arm
+                    addLimbArea(silhouette, lm[12], lm[14], lm[16], PROCESSING_WIDTH); // Right arm
+                    addLimbArea(silhouette, lm[23], lm[25], lm[27], PROCESSING_WIDTH); // Left leg
+                    addLimbArea(silhouette, lm[24], lm[26], lm[28], PROCESSING_WIDTH); // Right leg
+                    
+                    // Add head area
+                    addHeadArea(silhouette, lm[0], PROCESSING_WIDTH);
+                }
+            }
+            
+            return silhouette;
+        }
+        
+        function fillPolygon(silhouette, points, width) {
+            // Simple polygon fill algorithm
+            const minY = Math.floor(Math.min(...points.map(p => p.y)));
+            const maxY = Math.ceil(Math.max(...points.map(p => p.y)));
+            
+            for (let y = minY; y <= maxY; y++) {
+                const intersections = [];
+                
+                // Find intersections with polygon edges
+                for (let i = 0; i < points.length; i++) {
+                    const p1 = points[i];
+                    const p2 = points[(i + 1) % points.length];
+                    
+                    if ((p1.y <= y && p2.y > y) || (p2.y <= y && p1.y > y)) {
+                        const x = p1.x + (y - p1.y) * (p2.x - p1.x) / (p2.y - p1.y);
+                        intersections.push(x);
+                    }
+                }
+                
+                // Sort intersections and fill between them
+                intersections.sort((a, b) => a - b);
+                
+                for (let i = 0; i < intersections.length; i += 2) {
+                    const startX = Math.floor(intersections[i]);
+                    const endX = Math.ceil(intersections[i + 1]);
+                    
+                    for (let x = startX; x <= endX; x++) {
+                        if (x >= 0 && x < width && y >= 0 && y < PROCESSING_HEIGHT) {
+                            const idx = y * width + x;
+                            silhouette[idx] = 255;
+                        }
+                    }
+                }
+            }
+        }
+        
+        function addLimbArea(silhouette, joint1, joint2, joint3, width) {
+            if (!joint1 || !joint2 || !joint3) return;
+            
+            // Create thick line between joints
+            const points = [
+                { x: joint1.x * width, y: joint1.y * PROCESSING_HEIGHT },
+                { x: joint2.x * width, y: joint2.y * PROCESSING_HEIGHT },
+                { x: joint3.x * width, y: joint3.y * PROCESSING_HEIGHT }
+            ];
+            
+            // Draw thick lines
+            for (let i = 0; i < points.length - 1; i++) {
+                drawThickLine(silhouette, points[i], points[i + 1], width, 8);
+            }
+        }
+        
+        function addHeadArea(silhouette, head, width) {
+            if (!head) return;
+            
+            const x = Math.floor(head.x * width);
+            const y = Math.floor(head.y * PROCESSING_HEIGHT);
+            const radius = 15;
+            
+            // Draw filled circle for head
+            for (let dy = -radius; dy <= radius; dy++) {
+                for (let dx = -radius; dx <= radius; dx++) {
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        const px = x + dx;
+                        const py = y + dy;
+                        
+                        if (px >= 0 && px < width && py >= 0 && py < PROCESSING_HEIGHT) {
+                            const idx = py * width + px;
+                            silhouette[idx] = 255;
+                        }
+                    }
+                }
+            }
+        }
+        
+        function drawThickLine(silhouette, start, end, width, thickness) {
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const steps = Math.ceil(distance);
+            
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const x = Math.floor(start.x + dx * t);
+                const y = Math.floor(start.y + dy * t);
+                
+                // Draw thick point
+                for (let dy = -thickness; dy <= thickness; dy++) {
+                    for (let dx = -thickness; dx <= thickness; dx++) {
+                        if (dx * dx + dy * dy <= thickness * thickness) {
+                            const px = x + dx;
+                            const py = y + dy;
+                            
+                            if (px >= 0 && px < width && py >= 0 && py < PROCESSING_HEIGHT) {
+                                const idx = py * width + px;
+                                silhouette[idx] = 255;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        function calculateGradient(data, pixelIdx, width) {
+            const x = (pixelIdx / 4) % width;
+            const y = Math.floor((pixelIdx / 4) / width);
+            
+            if (x <= 0 || x >= width - 1 || y <= 0 || y >= PROCESSING_HEIGHT - 1) {
+                return 0;
+            }
+            
+            // Calculate brightness gradient
+            const centerBrightness = (data[pixelIdx] + data[pixelIdx + 1] + data[pixelIdx + 2]) / 3;
+            
+            let totalDiff = 0;
+            let neighbors = 0;
+            
+            // Check 8 neighbors
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    const neighborIdx = (ny * width + nx) * 4;
+                    
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < PROCESSING_HEIGHT) {
+                        const neighborBrightness = (data[neighborIdx] + data[neighborIdx + 1] + data[neighborIdx + 2]) / 3;
+                        totalDiff += Math.abs(centerBrightness - neighborBrightness);
+                        neighbors++;
+                    }
+                }
+            }
+            
+            return neighbors > 0 ? totalDiff / neighbors : 0;
+        }
+        
+        function detectContourEdges(silhouette) {
+            const edges = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
+            let edgeCount = 0;
+            let silhouetteCount = 0;
+            
+            // Edge detection on silhouette
+            for (let y = 1; y < PROCESSING_HEIGHT - 1; y++) {
+                for (let x = 1; x < PROCESSING_WIDTH - 1; x++) {
+                    const idx = y * PROCESSING_WIDTH + x;
+                    
+                    if (silhouette[idx] > 0) {
+                        silhouetteCount++;
+                        
+                        // Check if this is an edge pixel
+                        const neighbors = [
+                            silhouette[(y-1) * PROCESSING_WIDTH + (x-1)],
+                            silhouette[(y-1) * PROCESSING_WIDTH + x],
+                            silhouette[(y-1) * PROCESSING_WIDTH + (x+1)],
+                            silhouette[y * PROCESSING_WIDTH + (x-1)],
+                            silhouette[y * PROCESSING_WIDTH + (x+1)],
+                            silhouette[(y+1) * PROCESSING_WIDTH + (x-1)],
+                            silhouette[(y+1) * PROCESSING_WIDTH + x],
+                            silhouette[(y+1) * PROCESSING_WIDTH + (x+1)]
+                        ];
+                        
+                        // Edge if any neighbor is background (0)
+                        const isEdge = neighbors.some(n => n === 0);
+                        if (isEdge) {
+                            edges[idx] = 255;
+                            edgeCount++;
+                        }
+                    }
+                }
+            }
+            
+            console.log(`🔍 Edge detection: ${edgeCount} edges found from ${silhouetteCount} silhouette pixels`);
+            return edges;
+        }
+        
+        function renderSilhouetteNeonOutline(edges) {
+            // Clear canvas efficiently
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Multi-color neon gradient animation
+            const time = performance.now() * 0.001;
+            const colors = [
+                '#FF00FF', // Magenta
+                '#8A2BE2', // Purple
+                '#00FFFF', // Cyan
+                '#00FF7F', // Green
+                '#FFFF00'  // Yellow
+            ];
+            
+            // Scale to full canvas
+            const scaleX = canvas.width / PROCESSING_WIDTH;
+            const scaleY = canvas.height / PROCESSING_HEIGHT;
+            
+            // Render layered neon edges
+            const layers = [
+                { alpha: 0.15, blur: 50, width: 25 },
+                { alpha: 0.4, blur: 25, width: 15 },
+                { alpha: 0.8, blur: 10, width: 8 },
+                { alpha: 1.0, blur: 3, width: 3 }
+            ];
+            
+            layers.forEach(layer => {
+                ctx.globalAlpha = layer.alpha;
+                ctx.shadowBlur = layer.blur;
+                ctx.lineWidth = layer.width;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                // Draw contour edges
+                for (let y = 0; y < PROCESSING_HEIGHT; y++) {
+                    for (let x = 0; x < PROCESSING_WIDTH; x++) {
+                        const idx = y * PROCESSING_WIDTH + x;
+                        
+                        if (edges[idx] > 0) {
+                            const screenX = x * scaleX;
+                            const screenY = y * scaleY;
+                            
+                            // Animated color based on position and time
+                            const colorIndex = Math.floor((x + y + time * 50) / 100) % colors.length;
+                            ctx.strokeStyle = colors[colorIndex];
+                            ctx.shadowColor = colors[colorIndex];
+                            
+                            // Draw edge point as small stroke for smoothness
+                            ctx.beginPath();
+                            ctx.moveTo(screenX, screenY);
+                            
+                            // Connect to nearby edge pixels for continuity
+                            const neighbors = getConnectedEdges(edges, x, y, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+                            if (neighbors.length > 0) {
+                                const neighbor = neighbors[0];
+                                const neighborX = neighbor.x * scaleX;
+                                const neighborY = neighbor.y * scaleY;
+                                ctx.lineTo(neighborX, neighborY);
+                            } else {
+                                ctx.lineTo(screenX + 1, screenY);
+                            }
+                            
+                            ctx.stroke();
+                        }
+                    }
+                }
+            });
+            
+            // Reset
+            ctx.globalAlpha = 1.0;
+            ctx.shadowBlur = 0;
+        }
+        
+        function getConnectedEdges(edges, x, y, width, height) {
+            const neighbors = [];
+            const directions = [
+                [-1, -1], [0, -1], [1, -1],
+                [-1, 0],           [1, 0],
+                [-1, 1], [0, 1], [1, 1]
+            ];
+            
+            directions.forEach(([dx, dy]) => {
+                const nx = x + dx;
+                const ny = y + dy;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    const nidx = ny * width + nx;
+                    if (edges[nidx] > 0) {
+                        neighbors.push({ x: nx, y: ny });
+                    }
+                }
+            });
+            
+            return neighbors;
+        }
+        
+        function renderPoseBasedNeonOutline() {
+            if (smoothedLandmarks.length === 0) return;
+            
+            const lm = smoothedLandmarks;
+            
+            // Clear canvas efficiently
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Multi-color neon gradient animation
+            const time = performance.now() * 0.001;
+            const colors = [
+                '#FF00FF', // Magenta
+                '#8A2BE2', // Purple
+                '#00FFFF', // Cyan
+                '#00FF7F', // Green
+                '#FFFF00'  // Yellow
+            ];
+            
+            // Define body parts with keypoints
+            const bodyParts = [
+                // Head (using face landmarks)
+                {
+                    points: [0, 1, 2, 3, 7],
+                    colorIndex: 0,
+                    lineWidth: 15
+                },
+                // Torso (shoulders to hips)
+                {
+                    points: [11, 12, 24, 23, 11],
+                    colorIndex: 1,
+                    lineWidth: 20
+                },
+                // Left arm
+                {
+                    points: [11, 13, 15],
+                    colorIndex: 2,
+                    lineWidth: 12
+                },
+                // Right arm
+                {
+                    points: [12, 14, 16],
+                    colorIndex: 2,
+                    lineWidth: 12
+                },
+                // Left leg
+                {
+                    points: [23, 25, 27],
+                    colorIndex: 3,
+                    lineWidth: 14
+                },
+                // Right leg
+                {
+                    points: [24, 26, 28],
+                    colorIndex: 3,
+                    lineWidth: 14
+                }
+            ];
+            
+            // Render layered neon outline
+            const layers = [
+                { alpha: 0.2, blur: 40, widthMultiplier: 2.5 },
+                { alpha: 0.5, blur: 20, widthMultiplier: 1.5 },
+                { alpha: 1.0, blur: 8, widthMultiplier: 1.0 }
+            ];
+            
+            layers.forEach(layer => {
+                ctx.globalAlpha = layer.alpha;
+                ctx.shadowBlur = layer.blur;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                bodyParts.forEach(part => {
+                    const color = colors[(part.colorIndex + Math.floor(time)) % colors.length];
+                    ctx.strokeStyle = color;
+                    ctx.shadowColor = color;
+                    ctx.lineWidth = part.lineWidth * layer.widthMultiplier;
+                    
+                    drawSmoothBodyCurve(part.points, lm);
+                });
+            });
+            
+            // Draw joint circles with glow
+            const joints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+            joints.forEach((jointIndex, i) => {
+                const landmark = lm[jointIndex];
+                if (landmark) {
+                    const color = colors[(i + Math.floor(time)) % colors.length];
+                    
+                    // Outer glow
+                    ctx.fillStyle = color;
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 25;
+                    ctx.globalAlpha = 0.8;
+                    ctx.beginPath();
+                    ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Bright center
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.shadowBlur = 0;
+                    ctx.globalAlpha = 1.0;
+                    ctx.beginPath();
+                    ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            // Reset
+            ctx.globalAlpha = 1.0;
+            ctx.shadowBlur = 0;
+        }
+        
+        function drawSmoothBodyCurve(pointIndices, landmarks) {
+            if (pointIndices.length < 2) return;
+            
+            ctx.beginPath();
+            
+            // Start at first point
+            const firstPoint = landmarks[pointIndices[0]];
+            if (!firstPoint) return;
+            
+            ctx.moveTo(firstPoint.x * canvas.width, firstPoint.y * canvas.height);
+            
+            // Draw smooth curves through points
+            for (let i = 1; i < pointIndices.length - 1; i++) {
+                const currentPoint = landmarks[pointIndices[i]];
+                const nextPoint = landmarks[pointIndices[i + 1]];
+                
+                if (currentPoint && nextPoint) {
+                    // Quadratic curve for smoothness
+                    const cpX = currentPoint.x * canvas.width;
+                    const cpY = currentPoint.y * canvas.height;
+                    const endX = nextPoint.x * canvas.width;
+                    const endY = nextPoint.y * canvas.height;
+                    
+                    // Control point for smooth curve
+                    const controlX = (cpX + endX) / 2;
+                    const controlY = (cpY + endY) / 2;
+                    
+                    ctx.quadraticCurveTo(cpX, cpY, controlX, controlY);
+                }
+            }
+            
+            // Draw to last point
+            const lastPoint = landmarks[pointIndices[pointIndices.length - 1]];
+            if (lastPoint) {
+                ctx.lineTo(lastPoint.x * canvas.width, lastPoint.y * canvas.height);
+            }
+            
+            ctx.stroke();
         }
         
         function runSimpleEdgeDetection(mask) {
