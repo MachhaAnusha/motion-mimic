@@ -2752,23 +2752,23 @@
             ctx.scale(-1, 1);
 
             // Layer 1: widest bloom
-            ctx.filter = 'blur(16px) brightness(1.8)';
-            ctx.globalAlpha = 0.4;
+            ctx.filter = 'blur(16px) brightness(1.0)';
+            ctx.globalAlpha = 0.25;
             ctx.drawImage(small, 0, 0, cw, ch);
 
             // Layer 2: mid bloom
-            ctx.filter = 'blur(8px) brightness(2.0)';
-            ctx.globalAlpha = 0.6;
+            ctx.filter = 'blur(8px) brightness(1.1)';
+            ctx.globalAlpha = 0.4;
             ctx.drawImage(small, 0, 0, cw, ch);
 
             // Layer 3: tight inner glow
-            ctx.filter = 'blur(3px) brightness(2.2)';
-            ctx.globalAlpha = 0.85;
+            ctx.filter = 'blur(3px) brightness(1.2)';
+            ctx.globalAlpha = 0.65;
             ctx.drawImage(small, 0, 0, cw, ch);
 
-            // Layer 4: crisp bright core
-            ctx.filter = 'brightness(2.5) saturate(2.5) contrast(1.2)';
-            ctx.globalAlpha = 1.0;
+            // Layer 4: crisp core — no extra brightness, just clean sharp lines
+            ctx.filter = 'saturate(1.8) contrast(1.1)';
+            ctx.globalAlpha = 0.9;
             ctx.drawImage(small, 0, 0, cw, ch);
 
             ctx.filter = 'none';
