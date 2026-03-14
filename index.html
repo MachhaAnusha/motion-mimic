@@ -604,8 +604,8 @@
         let segmentationCompleted = false;
         let currentEdges = null;
         const SEGMENTATION_INTERVAL = 100; // ms
-        const PROCESSING_WIDTH = 320;
-        const PROCESSING_HEIGHT = 240;
+        const PROCESSING_WIDTH = 640;
+        const PROCESSING_HEIGHT = 480;
         const TARGET_FPS = 30;
         const FRAME_DELAY = 1000 / TARGET_FPS;
         let lastFrameTime = 0;
@@ -2506,8 +2506,11 @@
             maskedCanvas.height = PROCESSING_HEIGHT;
             const maskedCtx = maskedCanvas.getContext('2d', { willReadFrequently: true });
             
-            // Draw original video frame
-            maskedCtx.drawImage(video, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            // Mirror the video horizontally
+            maskedCtx.save();
+            maskedCtx.scale(-1, 1);
+            maskedCtx.drawImage(video, -PROCESSING_WIDTH, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            maskedCtx.restore();
             
             // MediaPipe Selfie Segmentation returns an ImageBitmap/HTMLCanvasElement
             // Draw the mask to a temp canvas first, then read its pixel data
@@ -2516,8 +2519,11 @@
             maskCanvas.height = PROCESSING_HEIGHT;
             const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
             
-            // Draw the mask image to the temp canvas
-            maskCtx.drawImage(mask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            // Mirror the mask canvas the same way
+            maskCtx.save();
+            maskCtx.scale(-1, 1);
+            maskCtx.drawImage(mask, -PROCESSING_WIDTH, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            maskCtx.restore();
             
             // Get mask pixel data from the red channel (mask is grayscale)
             const maskImageData = maskCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
@@ -2552,15 +2558,19 @@
             const data = imageData.data;
             const edges = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
             
-            // Use alpha channel directly for edge detection (0 = background, 255 = person)
-            // This gives a perfectly clean boundary with no interior noise
-            const alpha = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
+            // Use luminance of video pixels (not alpha) for internal detail
+            // This captures face details, hair texture, clothing wrinkles, jewelry
+            const gray = new Uint8ClampedArray(PROCESSING_WIDTH * PROCESSING_HEIGHT);
             for (let i = 0; i < data.length; i += 4) {
                 const idx = i / 4;
-                alpha[idx] = data[i + 3]; // Alpha channel (0 or 255)
+                if (data[i + 3] > 0) { // only inside the mask
+                    gray[idx] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                } else {
+                    gray[idx] = 0;
+                }
             }
             
-            // Sobel edge detection on alpha channel for clean boundary
+            // Sobel edge detection on luminance for fine details
             const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
             const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
             
@@ -2571,19 +2581,20 @@
                     let gx = 0;
                     let gy = 0;
                     
-                    // Apply Sobel operator on alpha channel
+                    // Apply Sobel operator on luminance
                     for (let ky = -1; ky <= 1; ky++) {
                         for (let kx = -1; kx <= 1; kx++) {
                             const kidx = (y + ky) * PROCESSING_WIDTH + (x + kx);
                             const kernelIdx = (ky + 1) * 3 + (kx + 1);
                             
-                            gx += alpha[kidx] * sobelX[kernelIdx];
-                            gy += alpha[kidx] * sobelY[kernelIdx];
+                            gx += gray[kidx] * sobelX[kernelIdx];
+                            gy += gray[kidx] * sobelY[kernelIdx];
                         }
                     }
                     
                     const magnitude = Math.sqrt(gx * gx + gy * gy);
-                    edges[idx] = magnitude > 127 ? 255 : 0; // Threshold for edge detection
+                    // Lower threshold to 15 to catch fine details like hair and jewelry
+                    edges[idx] = magnitude > 15 ? 255 : 0;
                 }
             }
             
@@ -2656,23 +2667,37 @@
             // Put colored pixels to offscreen canvas
             offCtx.putImageData(imageData, 0, 0);
             
-            // Draw with glow effect using CSS filters (much faster than per-pixel shadow)
-            ctx.filter = 'blur(8px)';
-            ctx.globalAlpha = 0.3;
+            // Draw with smooth neon glow using shadowBlur (not CSS blur)
+            const neonColors = ['#FF00FF', '#8A2BE2', '#00FFFF', '#00FF7F', '#FFFF00'];
+            const baseColor = neonColors[Math.floor(time) % neonColors.length];
+            
+            // Layer 1: Outer glow
+            ctx.shadowColor = baseColor;
+            ctx.shadowBlur = 40;
+            ctx.globalAlpha = 0.4;
             ctx.drawImage(offscreenCanvas, 0, 0);
             
-            ctx.filter = 'blur(4px)';
-            ctx.globalAlpha = 0.5;
+            // Layer 2: Middle glow
+            ctx.shadowColor = baseColor;
+            ctx.shadowBlur = 20;
+            ctx.globalAlpha = 0.6;
             ctx.drawImage(offscreenCanvas, 0, 0);
             
-            ctx.filter = 'blur(2px)';
-            ctx.globalAlpha = 0.7;
+            // Layer 3: Inner glow
+            ctx.shadowColor = baseColor;
+            ctx.shadowBlur = 8;
+            ctx.globalAlpha = 0.8;
             ctx.drawImage(offscreenCanvas, 0, 0);
             
-            // Core edge (no blur)
-            ctx.filter = 'none';
+            // Layer 4: Sharp core
+            ctx.shadowColor = baseColor;
+            ctx.shadowBlur = 0;
             ctx.globalAlpha = 1.0;
             ctx.drawImage(offscreenCanvas, 0, 0);
+            
+            // Reset shadow settings
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1.0;
         }
         
         function getConnectedEdges(edges, x, y, width, height) {
