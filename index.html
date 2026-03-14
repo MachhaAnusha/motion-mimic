@@ -761,7 +761,7 @@
             
             selfieSegmentation.setOptions({
                 modelSelection: 1, // Higher quality model
-                selfieMode: true
+                selfieMode: false
             });
             
             selfieSegmentation.onResults(onSegmentationResults);
@@ -2717,8 +2717,8 @@
 
             // Mirror horizontally to match PiP video (which has CSS scaleX(-1))
             ctx.save();
+            ctx.translate(cw, 0);
             ctx.scale(-1, 1);
-            ctx.translate(-cw, 0);
 
             // Layer 1: wide neon glow
             ctx.filter = 'blur(6px)';
