@@ -2550,7 +2550,7 @@
                 // MediaPipe mask is stored in the red channel (values 0-255)
                 const maskValue = maskData[maskIndex * 4]; // Red channel
                 
-                if (maskValue < 180) {
+                if (maskValue < 200) {
                     // Background - make transparent
                     data[i + 3] = 0; // Set alpha to 0
                 } else {
@@ -2560,6 +2560,38 @@
             }
             
             maskedCtx.putImageData(imageData, 0, 0);
+
+            // Erode mask by 3px to shrink inward and remove background bleed at edges
+            const eroded = maskedCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+            const erodedData = eroded.data;
+            const originalData = new Uint8ClampedArray(erodedData);
+            const EW = PROCESSING_WIDTH, EH = PROCESSING_HEIGHT;
+            const ERODE_RADIUS = 3;
+
+            for (let y = 0; y < EH; y++) {
+                for (let x = 0; x < EW; x++) {
+                        const idx = (y * EW + x) * 4;
+                        if (originalData[idx + 3] === 0) continue; // already background
+                        // If any neighbour within radius is background, this pixel becomes background
+                        let hasBackground = false;
+                        for (let dy = -ERODE_RADIUS; dy <= ERODE_RADIUS && !hasBackground; dy++) {
+                            for (let dx = -ERODE_RADIUS; dx <= ERODE_RADIUS && !hasBackground; dx++) {
+                                const nx = x + dx, ny = y + dy;
+                                if (nx < 0 || nx >= EW || ny < 0 || ny >= EH) {
+                                    hasBackground = true;
+                                } else {
+                                    const nidx = (ny * EW + nx) * 4;
+                                    if (originalData[nidx + 3] === 0) hasBackground = true;
+                                }
+                            }
+                        }
+                        if (hasBackground) {
+                            erodedData[idx + 3] = 0;
+                        }
+                    }
+            }
+
+            maskedCtx.putImageData(eroded, 0, 0);
             return maskedCanvas;
         }
         
