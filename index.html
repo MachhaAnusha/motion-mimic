@@ -2550,7 +2550,7 @@
                 // MediaPipe mask is stored in the red channel (values 0-255)
                 const maskValue = maskData[maskIndex * 4]; // Red channel
                 
-                if (maskValue < 128) {
+                if (maskValue < 180) {
                     // Background - make transparent
                     data[i + 3] = 0; // Set alpha to 0
                 } else {
@@ -2638,17 +2638,16 @@
                 }
             }
 
-            // LOW threshold — keep top 85% of edges to preserve all fine details
-            // (eyebrows, eyelids, nose bridge, lip lines, hair strands, necklace, fabric folds)
-            // Only the bottom 15% absolute weakest edges (camera sensor noise) are removed
-            const threshold = maxMag * 0.15;
+            // Higher threshold — keep top 75% of edges to reduce background bleed
+            // Still preserves face details, hair, and necklace but filters more noise
+            const threshold = maxMag * 0.10;
             const edges = new Uint8ClampedArray(W * H);
             for (let i = 0; i < W*H; i++) {
                 edges[i] = magnitude[i] > threshold ? 255 : 0;
             }
 
-            // Remove only truly isolated single pixels (0 edge neighbours)
-            // Do NOT require 2 neighbours — that would kill thin hair strands and fine lines
+            // Remove isolated noise dots — require at least 2 neighbours
+            // This kills scattered background pixels while preserving thin lines
             const cleaned = new Uint8ClampedArray(W * H);
             for (let y = 1; y < H-1; y++) {
                 for (let x = 1; x < W-1; x++) {
@@ -2658,7 +2657,7 @@
                     for (let dy = -1; dy <= 1; dy++)
                         for (let dx = -1; dx <= 1; dx++)
                             if ((dx||dy) && edges[(y+dy)*W+(x+dx)]) n++;
-                    if (n >= 1) cleaned[idx] = 255; // keep if at least 1 neighbour
+                    if (n >= 2) cleaned[idx] = 255; // require 2 neighbours to kill isolated noise
                 }
             }
 
@@ -2672,22 +2671,23 @@
             const W = PROCESSING_WIDTH, H = PROCESSING_HEIGHT;
             const cw = canvas.width, ch = canvas.height;
 
-            // Build a full-size colored edge ImageData directly at canvas resolution
-            // This is the FASTEST approach — one putImageData + two drawImage calls
-            // No per-stroke loop, no thousands of ctx.stroke() calls killing FPS
             const edgeImg = new ImageData(W, H);
             const ed = edgeImg.data;
 
             for (let y = 0; y < H; y++) {
-                // Smooth HSL gradient: magenta (300) at top → yellow (60) at bottom
+                // Color gradient matching reference image:
+                // top = magenta(300) → orange(30) → cyan(180) → blue(240) = bottom
                 const t = y / H;
-                const hue = (1 - t) * 300 + t * 60;
-                // Convert HSL to RGB inline for speed (no function call overhead)
+                let hue;
+                if (t < 0.25)      hue = 300 + t * 4 * (-270);
+                else if (t < 0.55) hue = 30 + (t - 0.25) / 0.30 * 150;
+                else               hue = 180 + (t - 0.55) / 0.45 * 60;
+
+                hue = ((hue % 360) + 360) % 360;
                 const h6 = hue / 60;
-                const s = 1.0, l = 0.65;
-                const C = (1 - Math.abs(2*l - 1)) * s;
+                const C = 0.70;
                 const X = C * (1 - Math.abs(h6 % 2 - 1));
-                const m = l - C/2;
+                const m = 0.30;
                 let rr=0, gg=0, bb=0;
                 if      (h6 < 1) { rr=C; gg=X; bb=0; }
                 else if (h6 < 2) { rr=X; gg=C; bb=0; }
@@ -2710,28 +2710,32 @@
                 }
             }
 
-            // Draw to small offscreen canvas
             const small = document.createElement('canvas');
             small.width = W; small.height = H;
             small.getContext('2d').putImageData(edgeImg, 0, 0);
 
-            // Mirror horizontally to match PiP video (which has CSS scaleX(-1))
+            // Mirror to match PiP
             ctx.save();
             ctx.translate(cw, 0);
             ctx.scale(-1, 1);
 
-            // Layer 1: wide neon glow
-            ctx.filter = 'blur(6px)';
+            // Layer 1: widest bloom
+            ctx.filter = 'blur(16px) brightness(1.8)';
+            ctx.globalAlpha = 0.4;
+            ctx.drawImage(small, 0, 0, cw, ch);
+
+            // Layer 2: mid bloom
+            ctx.filter = 'blur(8px) brightness(2.0)';
             ctx.globalAlpha = 0.6;
             ctx.drawImage(small, 0, 0, cw, ch);
 
-            // Layer 2: medium glow
-            ctx.filter = 'blur(3px)';
-            ctx.globalAlpha = 0.8;
+            // Layer 3: tight inner glow
+            ctx.filter = 'blur(3px) brightness(2.2)';
+            ctx.globalAlpha = 0.85;
             ctx.drawImage(small, 0, 0, cw, ch);
 
-            // Layer 3: sharp crisp core
-            ctx.filter = 'none';
+            // Layer 4: crisp bright core
+            ctx.filter = 'brightness(2.5) saturate(2.5) contrast(1.2)';
             ctx.globalAlpha = 1.0;
             ctx.drawImage(small, 0, 0, cw, ch);
 
