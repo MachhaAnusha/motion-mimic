@@ -4146,20 +4146,19 @@
         
         // FILTER 5: STARDUST MAN - PARTICLE BODY WITH VELOCITY TRAILS
         const STARDUST_CONFIG = {
-            particleCount: 2500,
-            particleSize: 1.6,
-            explosionThreshold: 7,
-            explosionParticlesPerFrame: 15,
-            explosionMaxParticles: 1000,
-            explosionLife: 80,
-            explosionSpeed: 5,
-            explosionSize: 2.2,
+            particleCount: 2800,
+            particleSize: 1.2,
+            explosionThreshold: 5,
+            explosionParticlesPerFrame: 12,
+            explosionMaxParticles: 500,
+            explosionLife: 70,
+            explosionSpeed: 4.5,
+            explosionSize: 2.0,
             colors: [
-                { r: 255, g: 255, b: 255, weight: 5 },
-                { r: 255, g: 230, b: 150, weight: 3 },
-                { r: 180, g: 220, b: 255, weight: 3 },
-                { r: 255, g: 200, b: 80,  weight: 2 },
-                { r: 120, g: 180, b: 255, weight: 1 },
+                { r: 255, g: 255, b: 255, weight: 7 },
+                { r: 255, g: 240, b: 170, weight: 3 },
+                { r: 210, g: 230, b: 255, weight: 2 },
+                { r: 255, g: 220, b: 120, weight: 1 },
             ]
         };
 
@@ -4182,38 +4181,80 @@
         }
 
         function updateStardustMaskPixels(mask) {
-            // Draw the segmentation mask to a tiny canvas and collect all "person" pixel positions
-            if (!stardustMaskCanvas) {
-                stardustMaskCanvas = document.createElement('canvas');
-                stardustMaskCtx = stardustMaskCanvas.getContext('2d', { willReadFrequently: true });
-            }
-            const SW = 160, SH = 120;
-            stardustMaskCanvas.width = SW;
-            stardustMaskCanvas.height = SH;
+    if (!stardustMaskCanvas) {
+        stardustMaskCanvas = document.createElement('canvas');
+        stardustMaskCtx = stardustMaskCanvas.getContext('2d', { willReadFrequently: true });
+    }
+    const SW = 320, SH = 240;
+    stardustMaskCanvas.width = SW;
+    stardustMaskCanvas.height = SH;
 
-            // Draw mirrored to match display orientation
-            stardustMaskCtx.save();
-            stardustMaskCtx.scale(-1, 1);
-            stardustMaskCtx.drawImage(mask, -SW, 0, SW, SH);
-            stardustMaskCtx.restore();
+    stardustMaskCtx.save();
+    stardustMaskCtx.scale(-1, 1);
+    stardustMaskCtx.drawImage(mask, -SW, 0, SW, SH);
+    stardustMaskCtx.restore();
 
-            const imgData = stardustMaskCtx.getImageData(0, 0, SW, SH);
-            const data = imgData.data;
-            const pixels = [];
-            const cw = canvas.width, ch = canvas.height;
-            const scaleX = cw / SW, scaleY = ch / SH;
+    const imgData = stardustMaskCtx.getImageData(0, 0, SW, SH);
+    const data = imgData.data;
+    const cw = canvas.width, ch = canvas.height;
 
-            for (let y = 0; y < SH; y++) {
-                for (let x = 0; x < SW; x++) {
-                    const idx = (y * SW + x) * 4;
-                    // red channel > 180 = high confidence person pixel
-                    if (data[idx] > 180) {
-                        pixels.push({ x: x * scaleX, y: y * scaleY });
-                    }
+    // Build binary mask
+    const binary = new Uint8Array(SW * SH);
+    for (let i = 0; i < SW * SH; i++) {
+        binary[i] = data[i * 4] > 190 ? 1 : 0;
+    }
+
+    // Erode 2px to remove background bleed
+    const pixels = [];
+    const ERODE = 2;
+    for (let y = ERODE; y < SH - ERODE; y++) {
+        for (let x = ERODE; x < SW - ERODE; x++) {
+            if (!binary[y * SW + x]) continue;
+            let clean = true;
+            outer: for (let dy = -ERODE; dy <= ERODE; dy++) {
+                for (let dx = -ERODE; dx <= ERODE; dx++) {
+                    if (!binary[(y+dy)*SW+(x+dx)]) { clean = false; break outer; }
                 }
             }
-            stardustMaskPixels = pixels;
+            // Store NORMALIZED coords (0-1) not screen coords
+            // This ensures even distribution when scaling to any canvas size
+            if (clean) pixels.push({ nx: x / SW, ny: y / SH });
         }
+    }
+
+    // Apply pose bounding box filter using normalized coords
+    let filteredPixels = pixels;
+    if (smoothedLandmarks && smoothedLandmarks.length >= 15) {
+        const lm = smoothedLandmarks;
+        let minX = 1, maxX = 0, minY = 1, maxY = 0;
+        lm.forEach(l => {
+            if (!l || l.visibility < 0.05) return;
+            if (l.x < minX) minX = l.x;
+            if (l.x > maxX) maxX = l.x;
+            if (l.y < minY) minY = l.y;
+            if (l.y > maxY) maxY = l.y;
+        });
+        const padX = (maxX - minX) * 0.40;
+        const padY = (maxY - minY) * 0.40;
+        const normBx1 = Math.max(0, minX - padX);
+        const normBx2 = Math.min(1, maxX + padX);
+        const normBy1 = Math.max(0, minY - padY);
+        const normBy2 = Math.min(1, maxY + padY * 1.6);
+        // Mirror: mask nx=0 is right side, nx=1 is left side
+        const mNx1 = 1 - normBx2;
+        const mNx2 = 1 - normBx1;
+        filteredPixels = pixels.filter(p =>
+            p.nx >= mNx1 && p.nx <= mNx2 &&
+            p.ny >= normBy1 && p.ny <= normBy2
+        );
+    }
+
+    // Convert to screen coords AFTER filtering
+    stardustMaskPixels = filteredPixels.map(p => ({
+        x: p.nx * cw,
+        y: p.ny * ch
+    }));
+}
 
         function renderStardustMan() {
             if (!smoothedLandmarks || smoothedLandmarks.length < 29) return;
@@ -4222,9 +4263,8 @@
             const cw = canvas.width, ch = canvas.height;
 
             // Refresh mask pixel list every frame when segmentation is available
-            if (segmentationMask && stardustFrameCount !== stardustLastMaskUpdate) {
+            if (segmentationMask) {
                 updateStardustMaskPixels(segmentationMask);
-                stardustLastMaskUpdate = stardustFrameCount;
             }
 
             // --- STEP 1: Detect fast joints and spawn explosion particles ---
@@ -4299,8 +4339,8 @@
                     // Pick random position from confirmed body pixels
                     const pt = stardustMaskPixels[Math.floor(Math.random() * total)];
                     // Small jitter so particles don't sit exactly on pixel grid
-                    const jx = pt.x + (Math.random() - 0.5) * 6;
-                    const jy = pt.y + (Math.random() - 0.5) * 6;
+                    const jx = pt.x + (Math.random() - 0.5) * 3;
+                    const jy = pt.y + (Math.random() - 0.5) * 3;
                     const col = getStardustColor();
                     const flicker = 0.4 + Math.random() * 0.6;
                     const size = STARDUST_CONFIG.particleSize * (0.3 + Math.random() * 0.9);
