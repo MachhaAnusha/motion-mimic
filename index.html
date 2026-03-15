@@ -374,7 +374,12 @@
             <span class="shortcut">6</span>
         </button>
         
-        <button class="filter-btn" data-filter="6">
+        <button class="filter-btn" data-filter="7">
+                <span class="emoji">🌀</span>
+                <span>Van Gogh Flow</span>
+                <span class="shortcut">8</span>
+            </button>
+            <button class="filter-btn" data-filter="6">
             <span class="emoji">🟦</span>
             <span>Voxel Cloud</span>
             <span class="shortcut">7</span>
@@ -649,6 +654,7 @@
             currentEdges = null;
             
             resetVoxelCloud();
+            resetVanGoghFlow();
             
             console.log("Filter data reset - all particles and trails cleared");
         }
@@ -795,7 +801,7 @@
                     console.log(`Filter button clicked: ${filterIndex} - "${buttonText}" - data-filter: ${newBtn.dataset.filter}`);
                     
                     // Validate the filter index
-                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 6) {
+                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 7) {
                         console.error(`Invalid filter index: ${filterIndex}`);
                         return;
                     }
@@ -850,6 +856,7 @@
                     case '5': switchFilter(4); break;  // Stardust Man
                     case '6': switchFilter(5); break;  // Warli Art
                     case '7': switchFilter(6); break;  // Voxel Cloud
+                case '8': switchFilter(7); break;  // Van Gogh Flow
                     case 'f': case 'F':
                         toggleFullscreen();
                         break;
@@ -1287,7 +1294,9 @@
             if (currentFilter === 2) {
                 renderNeonHumanOutline();
             } else if (currentFilter === 6) {
-                renderDigitalVoxelCloud();       // ← ADD THIS BRANCH
+                renderDigitalVoxelCloud();
+            } else if (currentFilter === 7) {
+                renderVanGoghFlow();
             } else if (smoothedLandmarks.length > 0) {
                 switch (currentFilter) {
                     case 0: renderNeonSpecter(); break;
@@ -4189,7 +4198,26 @@
         let stardustMaskPixels = [];
         let stardustLastMaskUpdate = 0;
 
-        // ── VOXEL CLOUD STATE ─────────────────────────────────────
+        // ── VAN GOGH FLOW FIELD STATE ─────────────────────────────────
+        const VG_COLS        = 80;   // field grid columns
+        const VG_ROWS        = 60;   // field grid rows
+        const VG_PARTICLES   = 2000; // total stroke particles
+        const VG_SPEED       = 1.8;  // base particle speed along field
+        const VG_DISTORT_R   = 90;   // radius of disturbance around each joint (px)
+        const VG_DISTORT_STR = 2.2;  // how strongly joints bend the field
+
+        let vgField       = null;  // Float32Array — current field angles
+        let vgBaseField   = null;  // Float32Array — original swirl angles (never modified directly)
+        let vgParticles   = [];    // stroke particles
+        let vgOffscreen   = null;  // persistent offscreen canvas (accumulates paint)
+        let vgOffCtx      = null;
+        let vgInitialized = false;
+        let vgPrevJoints  = {};    // previous joint positions for velocity calculation
+
+        // Van Gogh colour palette — 3:1 ratio blue to yellow matches Starry Night
+        const VG_BLUES   = ['#1a237e','#283593','#1565c0','#0277bd','#01579b','#0288d1','#039be5','#1e3a6e'];
+        const VG_YELLOWS = ['#f9a825','#f57f17','#ffd54f','#ffca28','#ffb300','#e65100','#ffa000'];
+        const VG_ALL     = [...VG_BLUES, ...VG_BLUES, ...VG_BLUES, ...VG_YELLOWS];
         const VC_GRID         = 10;    // cube size in px
         const VC_GAP          = 1;     // gap between cubes
         const VC_TRAIL_MAX    = 4000;  // max drifting trail cubes
@@ -4953,6 +4981,339 @@
         }
 
         // Initialize when page loads
+        // ============================================================
+        // FILTER 8: VAN GOGH FLOW FIELD
+        // ============================================================
+
+        function resetVanGoghFlow() {
+            vgField       = null;
+            vgBaseField   = null;
+            vgParticles   = [];
+            vgOffscreen   = null;
+            vgOffCtx      = null;
+            vgInitialized = false;
+            vgPrevJoints  = {};
+        }
+
+        // Build the base Van Gogh swirl field.
+        // Five overlapping circular swirls create the layered Starry Night turbulence.
+        function vgBuildBaseField(cw, ch) {
+            const field = new Float32Array(VG_COLS * VG_ROWS);
+            const cellW = cw / VG_COLS;
+            const cellH = ch / VG_ROWS;
+
+            const swirls = [
+                { cx: 0.72, cy: 0.22, r: 0.38, dir: 1, str: 1.4 }, // main top-right galaxy swirl
+                { cx: 0.28, cy: 0.30, r: 0.28, dir: -1, str: 1.1 }, // secondary upper-left swirl
+                { cx: 0.50, cy: 0.65, r: 0.45, dir: 1, str: 0.9 }, // large lower swirl
+                { cx: 0.85, cy: 0.70, r: 0.22, dir: -1, str: 0.8 }, // small right swirl
+                { cx: 0.12, cy: 0.75, r: 0.20, dir: 1, str: 0.7 }, // small left swirl
+            ];
+
+            for (let row = 0; row < VG_ROWS; row++) {
+                for (let col = 0; col < VG_COLS; col++) {
+                    const px = (col + 0.5) * cellW;
+                    const py = (row + 0.5) * cellH;
+                    let ax = 0, ay = 0;
+
+                    for (const s of swirls) {
+                        const scx = s.cx * cw;
+                        const scy = s.cy * ch;
+                        const sr  = s.r  * Math.min(cw, ch);
+                        const dx  = px - scx;
+                        const dy  = py - scy;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const influence = s.str * Math.exp(-dist * dist / (2 * sr * sr));
+                        // Tangent to circle = perpendicular to radial direction
+                        const tx = -dy * s.dir;
+                        const ty =  dx * s.dir;
+                        const tLen = Math.sqrt(tx * tx + ty * ty) || 1;
+                        ax += (tx / tLen) * influence;
+                        ay += (ty / tLen) * influence;
+                    }
+
+                    ax += 0.25; // gentle horizontal drift
+                    field[row * VG_COLS + col] = Math.atan2(ay, ax);
+                }
+            }
+            return field;
+        }
+
+        function vgInit(cw, ch) {
+            vgOffscreen = document.createElement('canvas');
+            vgOffscreen.width  = cw;
+            vgOffscreen.height = ch;
+            vgOffCtx = vgOffscreen.getContext('2d');
+
+            // Start with deep night-sky blue
+            vgOffCtx.fillStyle = '#0a0f2e';
+            vgOffCtx.fillRect(0, 0, cw, ch);
+
+            vgBaseField = vgBuildBaseField(cw, ch);
+            vgField     = new Float32Array(vgBaseField);
+
+            vgParticles = [];
+            for (let i = 0; i < VG_PARTICLES; i++) {
+                vgParticles.push(vgSpawnParticle(cw, ch));
+            }
+
+            vgInitialized = true;
+        }
+
+        function vgSpawnParticle(cw, ch) {
+            const col = VG_ALL[Math.floor(Math.random() * VG_ALL.length)];
+            const maxLife = Math.floor(Math.random() * 60) + 20;
+            return {
+                x:       Math.random() * cw,
+                y:       Math.random() * ch,
+                color:   col,
+                life:    maxLife,
+                maxLife: maxLife,
+                speed:   VG_SPEED * (0.6 + Math.random() * 0.8),
+                width:   1.2 + Math.random() * 2.2,
+                age:     0,
+            };
+        }
+
+        function vgFieldAngle(x, y, cw, ch) {
+            const col = Math.max(0, Math.min(VG_COLS - 1, (x / cw) * VG_COLS)) | 0;
+            const row = Math.max(0, Math.min(VG_ROWS - 1, (y / ch) * VG_ROWS)) | 0;
+            return vgField[row * VG_COLS + col];
+        }
+
+        // Apply disturbance from pose joints to field.
+        // Each moving joint temporarily overwrites nearby field angles
+        // with its movement direction, bending strokes around the body.
+        function vgApplyDisturbance(cw, ch) {
+            if (!smoothedLandmarks || smoothedLandmarks.length === 0) return;
+
+            const jointIds = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+            for (const ji of jointIds) {
+                const lm = smoothedLandmarks[ji];
+                if (!lm || (lm.visibility !== undefined && lm.visibility < 0.3)) continue;
+
+                const jx = (1 - lm.x) * cw; // mirror X for selfie
+                const jy = lm.y * ch;
+
+                let velX = 0, velY = 0;
+                if (vgPrevJoints[ji]) {
+                    velX = jx - vgPrevJoints[ji].x;
+                    velY = jy - vgPrevJoints[ji].y;
+                }
+                vgPrevJoints[ji] = { x: jx, y: jy };
+
+                const speed = Math.sqrt(velX * velX + velY * velY);
+                if (speed < 0.5) continue; // ignore micro-jitter
+
+                const moveAngle  = Math.atan2(velY, velX);
+                const distCellR  = (VG_DISTORT_R / Math.min(cw, ch)) * Math.min(VG_COLS, VG_ROWS);
+                const jCol       = (jx / cw) * VG_COLS;
+                const jRow       = (jy / ch) * VG_ROWS;
+
+                for (let row = 0; row < VG_ROWS; row++) {
+                    for (let col = 0; col < VG_COLS; col++) {
+                        const dc   = col - jCol;
+                        const dr   = row - jRow;
+                        const dist = Math.sqrt(dc * dc + dr * dr);
+                        if (dist > distCellR) continue;
+
+                        const t = Math.pow(1 - dist / distCellR, 2)
+                                  * Math.min(1, speed / 8)
+                                  * VG_DISTORT_STR;
+
+                        const baseAngle = vgBaseField[row * VG_COLS + col];
+                        // Angle interpolation via unit vector lerp (avoids wrap-around issues)
+                        const bx = Math.cos(baseAngle);
+                        const by = Math.sin(baseAngle);
+                        const mx = Math.cos(moveAngle);
+                        const my = Math.sin(moveAngle);
+                        const rx = bx + (mx - bx) * Math.min(1, t);
+                        const ry = by + (my - by) * Math.min(1, t);
+                        vgField[row * VG_COLS + col] = Math.atan2(ry, rx);
+                    }
+                }
+            }
+        }
+
+        // Gradually restore field to base — disturbances dissolve over time
+        function vgDecayField() {
+            const decay = 0.08;
+            for (let i = 0; i < vgField.length; i++) {
+                const base = vgBaseField[i];
+                const curr = vgField[i];
+                const bx = Math.cos(base);
+                const by = Math.sin(base);
+                const cx2 = Math.cos(curr);
+                const cy2 = Math.sin(curr);
+                const rx = cx2 + (bx - cx2) * decay;
+                const ry = cy2 + (by - cy2) * decay;
+                vgField[i] = Math.atan2(ry, rx);
+            }
+        }
+
+        function renderVanGoghFlow() {
+            const cw = canvas.width;
+            const ch = canvas.height;
+
+            // Initialise on first call or if canvas was resized
+            if (!vgInitialized || vgOffscreen.width !== cw || vgOffscreen.height !== ch) {
+                vgInit(cw, ch);
+            }
+
+            // ── STEP 1: Apply pose disturbance ────────────────────────
+            vgApplyDisturbance(cw, ch);
+
+            // ── STEP 2: Decay field back toward base ──────────────────
+            vgDecayField();
+
+            // ── STEP 3: Fade offscreen canvas — creates paint layering ─
+            vgOffCtx.globalAlpha = 0.035;
+            vgOffCtx.fillStyle   = '#0a0f2e';
+            vgOffCtx.fillRect(0, 0, cw, ch);
+            vgOffCtx.globalAlpha = 1;
+
+            // ── STEP 3b: ERASE person area from offscreen each frame ──
+            // This is the key fix for the frozen silhouette bug.
+            // Even though the silhouette is drawn live on the main canvas,
+            // strokes accumulate INSIDE the body on vgOffscreen over time.
+            // When the person moves, the old body area has dense bright strokes
+            // painted into it — which looks like a stuck silhouette outline.
+            // Fix: use destination-out to punch a transparent hole in vgOffscreen
+            // exactly where the person currently is, every frame.
+            // Then the dark background shows through naturally at that location,
+            // and strokes can never build up inside the body.
+            if (segmentationMask) {
+                // Build person mask at canvas resolution
+                const eraseCanvas = document.createElement('canvas');
+                eraseCanvas.width  = cw;
+                eraseCanvas.height = ch;
+                const eraseCtx = eraseCanvas.getContext('2d', { willReadFrequently: true });
+
+                // Read segmentation mask
+                const mTemp = document.createElement('canvas');
+                mTemp.width  = PROCESSING_WIDTH;
+                mTemp.height = PROCESSING_HEIGHT;
+                const mCtx = mTemp.getContext('2d', { willReadFrequently: true });
+                mCtx.drawImage(segmentationMask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+                const mData = mCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT).data;
+
+                // Fill person pixels as opaque white (any opaque colour works for destination-out)
+                eraseCtx.fillStyle = 'rgba(255,255,255,1)';
+                for (let py = 0; py < PROCESSING_HEIGHT; py += 3) {
+                    for (let px = 0; px < PROCESSING_WIDTH; px += 3) {
+                        const idx = (py * PROCESSING_WIDTH + px) * 4;
+                        if (mData[idx] > 200) {
+                            const sx = cw - (px / PROCESSING_WIDTH) * cw; // mirror X for selfie
+                            const sy = (py / PROCESSING_HEIGHT) * ch;
+                            eraseCtx.fillRect(sx - 6, sy - 6, 12, 12);
+                        }
+                    }
+                }
+
+                // Punch that shape out of vgOffscreen — removes ALL accumulated
+                // strokes inside the body, replacing them with transparency
+                vgOffCtx.globalCompositeOperation = 'destination-out';
+                vgOffCtx.globalAlpha = 0.85; // strong erase but not 100% — keeps subtle edge glow
+                vgOffCtx.drawImage(eraseCanvas, 0, 0);
+                vgOffCtx.globalCompositeOperation = 'source-over'; // CRITICAL: restore normal drawing
+                vgOffCtx.globalAlpha = 1;
+            }
+
+            // ── STEP 5: Update and draw stroke particles ──────────────
+            vgOffCtx.lineCap  = 'round';
+            vgOffCtx.lineJoin = 'round';
+
+            const toRespawn = [];
+
+            for (let i = 0; i < vgParticles.length; i++) {
+                const p = vgParticles[i];
+                p.age++;
+
+                const angle = vgFieldAngle(p.x, p.y, cw, ch);
+                const stepX = Math.cos(angle) * p.speed;
+                const stepY = Math.sin(angle) * p.speed;
+                const nx    = p.x + stepX;
+                const ny    = p.y + stepY;
+
+                // Life-based alpha: fade in → full → fade out
+                const lifeFrac = p.age / p.maxLife;
+                const alpha = lifeFrac < 0.15
+                    ? lifeFrac / 0.15
+                    : lifeFrac > 0.80
+                        ? (1 - lifeFrac) / 0.20
+                        : 1.0;
+
+                vgOffCtx.globalAlpha = alpha * 0.75;
+                vgOffCtx.strokeStyle = p.color;
+                vgOffCtx.lineWidth   = p.width;
+                vgOffCtx.beginPath();
+                vgOffCtx.moveTo(p.x, p.y);
+                vgOffCtx.lineTo(nx, ny);
+                vgOffCtx.stroke();
+
+                p.x = nx;
+                p.y = ny;
+                p.life--;
+
+                if (p.life <= 0 || nx < 0 || nx > cw || ny < 0 || ny > ch) {
+                    toRespawn.push(i);
+                }
+            }
+
+            vgOffCtx.globalAlpha = 1;
+
+            for (const idx of toRespawn) {
+                vgParticles[idx] = vgSpawnParticle(cw, ch);
+            }
+
+            // ── STEP 6: Blit offscreen then composite LIVE silhouette ─
+            // Draw the swirling strokes first, then stamp the person's
+            // current silhouette on top as a dark mask. Because this
+            // happens on the main canvas (not offscreen), it is always
+            // the current frame's position — never frozen or accumulated.
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur  = 0;
+            ctx.drawImage(vgOffscreen, 0, 0); // swirling paint layer
+
+            // Composite live silhouette on top of strokes
+            if (segmentationMask) {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width  = PROCESSING_WIDTH;
+                tempCanvas.height = PROCESSING_HEIGHT;
+                const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+                tempCtx.drawImage(segmentationMask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+                const maskData = tempCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT).data;
+
+                // Build a full-res silhouette image on a temp canvas
+                // then draw it on the main canvas in one call (fast)
+                const silCanvas = document.createElement('canvas');
+                silCanvas.width  = cw;
+                silCanvas.height = ch;
+                const silCtx = silCanvas.getContext('2d');
+
+                silCtx.fillStyle = '#070d1f'; // deep navy — person body colour
+
+                for (let py = 0; py < PROCESSING_HEIGHT; py += 3) {
+                    for (let px = 0; px < PROCESSING_WIDTH; px += 3) {
+                        const idx = (py * PROCESSING_WIDTH + px) * 4;
+                        if (maskData[idx] > 200) { // person pixel
+                            const sx = cw - (px / PROCESSING_WIDTH) * cw; // mirror X
+                            const sy = (py / PROCESSING_HEIGHT) * ch;
+                            silCtx.fillRect(sx - 5, sy - 5, 10, 10);
+                        }
+                    }
+                }
+
+                // Draw the live silhouette over the swirling strokes
+                ctx.globalAlpha = 0.92;
+                ctx.drawImage(silCanvas, 0, 0);
+                ctx.globalAlpha = 1;
+            }
+
+            ctx.shadowColor = 'transparent';
+        }
+
         window.addEventListener('load', init);
     </script>
 </body>
