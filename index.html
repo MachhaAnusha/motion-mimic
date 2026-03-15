@@ -5291,49 +5291,20 @@
                 silCanvas.height = ch;
                 const silCtx = silCanvas.getContext('2d');
 
-                // Pass 1: dark body fill — slightly lighter than pure black
-                // so it reads as a shape against the #000 background
-                silCtx.fillStyle = '#0e1a35';
+                // Pass 1: dark body fill — clean silhouette for immersive Van Gogh experience
+                silCtx.fillStyle = '#060d1f';
                 for (let py = 0; py < PROCESSING_HEIGHT; py += 3) {
                     for (let px = 0; px < PROCESSING_WIDTH; px += 3) {
                         const idx = (py * PROCESSING_WIDTH + px) * 4;
                         if (maskData[idx] > 200) {
                             const sx = cw - (px / PROCESSING_WIDTH) * cw;
                             const sy = (py / PROCESSING_HEIGHT) * ch;
-                            silCtx.fillRect(sx - 5, sy - 5, 10, 10);
+                            silCtx.fillRect(sx - 6, sy - 6, 12, 12);
                         }
                     }
                 }
 
-                // Pass 2: glowing edge — scan for body boundary pixels and
-                // paint a bright blue-white glow exactly at the silhouette edge.
-                // This makes the human shape read clearly like in the reference image.
-                silCtx.shadowBlur  = 12;
-                silCtx.shadowColor = 'rgba(100,180,255,0.9)';
-                silCtx.fillStyle   = 'rgba(120,200,255,0.7)';
-                const stride = 4; // check every 4th pixel for edge detection speed
-                for (let py = stride; py < PROCESSING_HEIGHT - stride; py += stride) {
-                    for (let px = stride; px < PROCESSING_WIDTH - stride; px += stride) {
-                        const idx = (py * PROCESSING_WIDTH + px) * 4;
-                        if (maskData[idx] > 200) {
-                            // Check if any neighbour is background (edge pixel)
-                            const above = ((py - stride) * PROCESSING_WIDTH + px) * 4;
-                            const below = ((py + stride) * PROCESSING_WIDTH + px) * 4;
-                            const left  = (py * PROCESSING_WIDTH + (px - stride)) * 4;
-                            const right = (py * PROCESSING_WIDTH + (px + stride)) * 4;
-                            const isEdge = maskData[above] < 100 || maskData[below] < 100 ||
-                                           maskData[left]  < 100 || maskData[right]  < 100;
-                            if (isEdge) {
-                                const sx = cw - (px / PROCESSING_WIDTH) * cw;
-                                const sy = (py / PROCESSING_HEIGHT) * ch;
-                                silCtx.fillRect(sx - 3, sy - 3, 6, 6);
-                            }
-                        }
-                    }
-                }
-                silCtx.shadowBlur = 0;
-
-                // Draw the complete silhouette (body + glowing edge) onto the main canvas
+                // Draw the clean silhouette onto the main canvas
                 ctx.globalAlpha = 1;
                 ctx.drawImage(silCanvas, 0, 0);
                 ctx.globalAlpha = 1;
