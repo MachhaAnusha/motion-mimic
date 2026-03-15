@@ -32,6 +32,22 @@
             flex-direction: column;
             gap: 15px;
             z-index: 1000;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #333 transparent;
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 2px;
         }
 
         .app-title {
@@ -374,15 +390,22 @@
             <span class="shortcut">6</span>
         </button>
         
-        <button class="filter-btn" data-filter="7">
-                <span class="emoji">🌀</span>
-                <span>Van Gogh Flow</span>
-                <span class="shortcut">8</span>
-            </button>
-            <button class="filter-btn" data-filter="6">
+        <button class="filter-btn" data-filter="6">
             <span class="emoji">🟦</span>
             <span>Voxel Cloud</span>
             <span class="shortcut">7</span>
+        </button>
+        
+        <button class="filter-btn" data-filter="7">
+            <span class="emoji">🌀</span>
+            <span>Van Gogh Flow</span>
+            <span class="shortcut">8</span>
+        </button>
+        
+        <button class="filter-btn" data-filter="8">
+            <span class="emoji">🌪️</span>
+            <span>Vortex Gravity Well</span>
+            <span class="shortcut">9</span>
         </button>
         
         <div class="top-controls">
@@ -655,6 +678,8 @@
             
             resetVoxelCloud();
             resetVanGoghFlow();
+            vgwParticles = [];
+            vgwInitialized = false;
             
             console.log("Filter data reset - all particles and trails cleared");
         }
@@ -801,7 +826,7 @@
                     console.log(`Filter button clicked: ${filterIndex} - "${buttonText}" - data-filter: ${newBtn.dataset.filter}`);
                     
                     // Validate the filter index
-                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 7) {
+                    if (isNaN(filterIndex) || filterIndex < 0 || filterIndex > 8) {
                         console.error(`Invalid filter index: ${filterIndex}`);
                         return;
                     }
@@ -857,6 +882,7 @@
                     case '6': switchFilter(5); break;  // Warli Art
                     case '7': switchFilter(6); break;  // Voxel Cloud
                 case '8': switchFilter(7); break;  // Van Gogh Flow
+                case '9': switchFilter(8); break;  // Vortex Gravity Well
                     case 'f': case 'F':
                         toggleFullscreen();
                         break;
@@ -1098,7 +1124,7 @@
                                 }
                                 
                                 // Run selfie segmentation for Neon Human Outline filter
-                                if (selfieSegmentation && cameraOn && (currentFilter === 2 || currentFilter === 4 || currentFilter === 6 || currentFilter === 7)) {
+                                if (selfieSegmentation && cameraOn && (currentFilter === 2 || currentFilter === 4 || currentFilter === 6 || currentFilter === 7 || currentFilter === 8)) {
                                     try {
                                         await selfieSegmentation.send({ image: video });
                                     } catch (error) {
@@ -1297,6 +1323,8 @@
                 renderDigitalVoxelCloud();
             } else if (currentFilter === 7) {
                 renderVanGoghFlow();
+            } else if (currentFilter === 8) {
+                renderVortexGravityWell();
             } else if (smoothedLandmarks.length > 0) {
                 switch (currentFilter) {
                     case 0: renderNeonSpecter(); break;
@@ -5308,6 +5336,256 @@
                 ctx.globalAlpha = 1;
                 ctx.drawImage(silCanvas, 0, 0);
                 ctx.globalAlpha = 1;
+            }
+
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur  = 0;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // FILTER 9: VORTEX GRAVITY WELL
+        // Particles are attracted by inverse-square gravity to the
+        // user's wrists/hands. Tangential force creates orbital swirl.
+        // Color shifts deep-blue → gold → white as speed increases.
+        // ═══════════════════════════════════════════════════════════
+
+        let vgwParticles    = [];
+        let vgwOffscreen    = null;
+        let vgwOffCtx       = null;
+        let vgwInitialized  = false;
+
+        const VGW_COUNT     = 2200;   // total particles
+        const VGW_G         = 18000;  // gravity constant (tunable)
+        const VGW_TANGENT   = 0.55;   // tangential swirl factor
+        const VGW_MAX_SPEED = 28;
+        const VGW_RESPAWN_R = 0.52;   // fraction of canvas diagonal for respawn ring
+
+        function vgwColorFromSpeed(speed) {
+            const t = Math.min(speed / VGW_MAX_SPEED, 1.0);
+            if (t < 0.4) {
+                // deep blue → gold
+                const s = t / 0.4;
+                const r = Math.round(20  + s * (255 - 20));
+                const g = Math.round(40  + s * (200 - 40));
+                const b = Math.round(180 + s * (20  - 180));
+                return `rgb(${r},${g},${b})`;
+            } else {
+                // gold → bright white-yellow
+                const s = (t - 0.4) / 0.6;
+                const r = 255;
+                const g = Math.round(200 + s * 55);
+                const b = Math.round(20  + s * 220);
+                return `rgb(${r},${g},${b})`;
+            }
+        }
+
+        function vgwSpawnParticle(cw, ch) {
+            // Spawn on a ring at the edge so particles flow inward
+            const angle  = Math.random() * Math.PI * 2;
+            const radius = Math.min(cw, ch) * VGW_RESPAWN_R * (0.85 + Math.random() * 0.3);
+            return {
+                x  : cw * 0.5 + Math.cos(angle) * radius,
+                y  : ch * 0.5 + Math.sin(angle) * radius,
+                vx : (Math.random() - 0.5) * 1.2,
+                vy : (Math.random() - 0.5) * 1.2,
+                size: 1.5 + Math.random() * 2.5,
+            };
+        }
+
+        function vgwInit(cw, ch) {
+            vgwOffscreen      = document.createElement('canvas');
+            vgwOffscreen.width  = cw;
+            vgwOffscreen.height = ch;
+            vgwOffCtx = vgwOffscreen.getContext('2d');
+            vgwOffCtx.fillStyle = '#000';
+            vgwOffCtx.fillRect(0, 0, cw, ch);
+            vgwParticles = Array.from({ length: VGW_COUNT }, () => vgwSpawnParticle(cw, ch));
+            vgwInitialized = true;
+        }
+
+        function renderVortexGravityWell() {
+            const cw = canvas.width;
+            const ch = canvas.height;
+
+            if (!vgwInitialized || vgwOffscreen.width !== cw || vgwOffscreen.height !== ch) {
+                vgwInit(cw, ch);
+            }
+
+            // ── Collect gravity sources from pose landmarks (wrists + head) ──
+            // MediaPipe Pose: 15=left wrist, 16=right wrist, 0=nose
+            // Landmarks are normalized [0,1]; video is mirrored so flip X.
+            const sources = [];
+            if (smoothedLandmarks.length > 0) {
+                const lmIndexes = [15, 16, 0];
+                const weights   = [1.0, 1.0, 0.4]; // hands pull harder than head
+                for (let li = 0; li < lmIndexes.length; li++) {
+                    const lm = smoothedLandmarks[lmIndexes[li]];
+                    if (lm && lm.visibility > 0.4) {
+                        sources.push({
+                            x : (1 - lm.x) * cw,   // mirror X
+                            y : lm.y * ch,
+                            w : weights[li],
+                        });
+                    }
+                }
+            }
+
+            // ── Fade offscreen (trail effect) ──
+            vgwOffCtx.globalAlpha = 0.18;
+            vgwOffCtx.fillStyle   = '#000';
+            vgwOffCtx.fillRect(0, 0, cw, ch);
+            vgwOffCtx.globalAlpha = 1;
+
+            // ── Erase person area from offscreen each frame (same technique as Van Gogh) ──
+            if (segmentationMask) {
+                const eraseCanvas   = document.createElement('canvas');
+                eraseCanvas.width   = cw;
+                eraseCanvas.height  = ch;
+                const eraseCtx      = eraseCanvas.getContext('2d', { willReadFrequently: true });
+                const mTemp         = document.createElement('canvas');
+                mTemp.width         = PROCESSING_WIDTH;
+                mTemp.height        = PROCESSING_HEIGHT;
+                const mCtx          = mTemp.getContext('2d', { willReadFrequently: true });
+                mCtx.drawImage(segmentationMask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+                const mData         = mCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT).data;
+
+                eraseCtx.fillStyle = 'rgba(255,255,255,1)';
+                for (let py = 0; py < PROCESSING_HEIGHT; py += 3) {
+                    for (let px = 0; px < PROCESSING_WIDTH; px += 3) {
+                        const idx = (py * PROCESSING_WIDTH + px) * 4;
+                        if (mData[idx] > 200) {
+                            const sx = cw - (px / PROCESSING_WIDTH) * cw;
+                            const sy = (py / PROCESSING_HEIGHT) * ch;
+                            eraseCtx.fillRect(sx - 6, sy - 6, 12, 12);
+                        }
+                    }
+                }
+                vgwOffCtx.globalCompositeOperation = 'destination-out';
+                vgwOffCtx.globalAlpha = 0.85;
+                vgwOffCtx.drawImage(eraseCanvas, 0, 0);
+                vgwOffCtx.globalCompositeOperation = 'source-over';
+                vgwOffCtx.globalAlpha = 1;
+            }
+
+            // ── Update and draw each particle ──
+            vgwOffCtx.lineCap = 'round';
+
+            for (let i = 0; i < vgwParticles.length; i++) {
+                const p = vgwParticles[i];
+
+                if (sources.length > 0) {
+                    // Accumulate gravitational acceleration from all sources
+                    let ax = 0, ay = 0;
+                    for (const src of sources) {
+                        const dx   = src.x - p.x;
+                        const dy   = src.y - p.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+
+                        // Kill + respawn if particle reaches the hand (event-horizon collapse)
+                        if (dist < 18) {
+                            vgwParticles[i] = vgwSpawnParticle(cw, ch);
+                            break;
+                        }
+
+                        const force   = (VGW_G * src.w) / (dist * dist);  // F = G·M/r²
+                        const normX   = dx / dist;
+                        const normY   = dy / dist;
+
+                        // Radial attraction
+                        ax += normX * force;
+                        ay += normY * force;
+
+                        // Tangential component (perpendicular → creates the vortex swirl)
+                        ax += -normY * force * VGW_TANGENT;
+                        ay +=  normX * force * VGW_TANGENT;
+                    }
+                    p.vx += ax * 0.016;  // ~60fps timestep
+                    p.vy += ay * 0.016;
+                } else {
+                    // No gravity sources — gentle ambient drift so screen isn't dead
+                    p.vx += (Math.random() - 0.5) * 0.08;
+                    p.vy += (Math.random() - 0.5) * 0.08;
+                }
+
+                // Speed cap
+                const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+                if (speed > VGW_MAX_SPEED) {
+                    p.vx = (p.vx / speed) * VGW_MAX_SPEED;
+                    p.vy = (p.vy / speed) * VGW_MAX_SPEED;
+                }
+
+                const nx = p.x + p.vx;
+                const ny = p.y + p.vy;
+
+                // Motion-blur stroke: longer line the faster the particle
+                const blurLen = Math.min(speed * 1.4, 30);
+                const nx2 = p.x - (p.vx / speed) * blurLen;
+                const ny2 = p.y - (p.vy / speed) * blurLen;
+
+                const color = vgwColorFromSpeed(speed);
+                vgwOffCtx.strokeStyle = color;
+                vgwOffCtx.lineWidth   = p.size * (0.6 + speed / VGW_MAX_SPEED);
+                vgwOffCtx.globalAlpha = 0.55 + (speed / VGW_MAX_SPEED) * 0.45;
+                vgwOffCtx.beginPath();
+                vgwOffCtx.moveTo(nx2, ny2);
+                vgwOffCtx.lineTo(nx, ny);
+                vgwOffCtx.stroke();
+                vgwOffCtx.globalAlpha = 1;
+
+                p.x = nx;
+                p.y = ny;
+
+                // Respawn if out of bounds
+                if (nx < -20 || nx > cw + 20 || ny < -20 || ny > ch + 20) {
+                    vgwParticles[i] = vgwSpawnParticle(cw, ch);
+                }
+            }
+
+            // ── Add glowing halo rings at each gravity source ──
+            for (const src of sources) {
+                const grad = ctx.createRadialGradient(src.x, src.y, 4, src.x, src.y, 55);
+                grad.addColorStop(0,   'rgba(255,240,120,0.85)');
+                grad.addColorStop(0.35,'rgba(255,180,30, 0.40)');
+                grad.addColorStop(1,   'rgba(255,120,0,  0)');
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(src.x, src.y, 55, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // ── Blit particle layer then draw silhouette on top ──
+            ctx.globalAlpha = 1;
+            ctx.drawImage(vgwOffscreen, 0, 0);
+
+            if (segmentationMask) {
+                const tempCanvas   = document.createElement('canvas');
+                tempCanvas.width   = PROCESSING_WIDTH;
+                tempCanvas.height  = PROCESSING_HEIGHT;
+                const tempCtx      = tempCanvas.getContext('2d', { willReadFrequently: true });
+                tempCtx.drawImage(segmentationMask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
+                const maskData     = tempCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT).data;
+
+                const silCanvas    = document.createElement('canvas');
+                silCanvas.width    = cw;
+                silCanvas.height   = ch;
+                const silCtx       = silCanvas.getContext('2d');
+
+                silCtx.fillStyle = '#060d1f';
+                for (let py = 0; py < PROCESSING_HEIGHT; py += 3) {
+                    for (let px = 0; px < PROCESSING_WIDTH; px += 3) {
+                        const idx = (py * PROCESSING_WIDTH + px) * 4;
+                        if (maskData[idx] > 200) {
+                            const sx = cw - (px / PROCESSING_WIDTH) * cw;
+                            const sy = (py / PROCESSING_HEIGHT) * ch;
+                            silCtx.fillRect(sx - 6, sy - 6, 12, 12);
+                        }
+                    }
+                }
+                ctx.globalAlpha = 1;
+                ctx.drawImage(silCanvas, 0, 0);
             }
 
             ctx.shadowColor = 'transparent';
