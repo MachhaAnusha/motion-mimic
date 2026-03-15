@@ -243,6 +243,72 @@
             position: relative;
         }
 
+        /* Fullscreen mode — sidebar hidden, canvas fills entire screen */
+        body.fullscreen .sidebar {
+            transform: translateX(-220px);
+            transition: transform 0.3s ease;
+        }
+
+        body.fullscreen .main-canvas {
+            left: 0;
+        }
+
+        body.fullscreen #mainCanvas {
+            width: 100vw;
+        }
+
+        body.fullscreen .top-controls {
+            left: 50%;
+        }
+
+        body.fullscreen .pip-box {
+            right: 20px;
+        }
+
+        /* Exit fullscreen button */
+        #exitFullscreenBtn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 2000;
+            background: rgba(0,0,0,0.6);
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            display: none;
+            transition: background 0.2s;
+        }
+
+        #exitFullscreenBtn:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+        #enterFullscreenBtn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 2000;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid #00ffff;
+            color: #00ffff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        #enterFullscreenBtn:hover {
+            background: rgba(0, 255, 255, 0.15);
+        }
+
+        .sidebar {
+            transition: transform 0.3s ease;
+        }
+
         .pip-box {
             position: fixed;
             bottom: 20px;
@@ -348,6 +414,8 @@
     </style>
 </head>
 <body>
+<button id="exitFullscreenBtn" onclick="exitFullscreenMode()">☰ Filters</button>
+<button id="enterFullscreenBtn" onclick="enterFullscreenMode()">⛶ Full Screen</button>
     <div class="sidebar">
         <div class="app-title">
             <h1>MotionAura</h1>
@@ -746,12 +814,11 @@
         
         function resizeCanvas() {
             if (!canvas) return;
-            
-            canvas.width = window.innerWidth - 220;
+            const isFullscreen = document.body.classList.contains('fullscreen');
+            canvas.width  = isFullscreen ? window.innerWidth : window.innerWidth - 220;
             canvas.height = window.innerHeight;
-            
             if (inkCanvas) {
-                inkCanvas.width = canvas.width;
+                inkCanvas.width  = canvas.width;
                 inkCanvas.height = canvas.height;
             }
         }
@@ -1058,19 +1125,30 @@
             document.querySelectorAll('.filter-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
-            
-            // Find the correct button by data-filter attribute
+
             const targetButton = document.querySelector(`[data-filter="${index}"]`);
             if (targetButton) {
                 targetButton.classList.add('active');
             }
-            
-            // Show/hide clear button for Silk Stream and Ink Fury
-            document.getElementById('clearBtn').style.display = 
+
+            document.getElementById('clearBtn').style.display =
                 index === 3 ? 'block' : 'none';
-            
-            // Reset filter-specific data
+
             resetFilterData();
+        }
+
+        function enterFullscreenMode() {
+            document.body.classList.add('fullscreen');
+            document.getElementById('exitFullscreenBtn').style.display = 'block';
+            document.getElementById('enterFullscreenBtn').style.display = 'none';
+            resizeCanvas();
+        }
+
+        function exitFullscreenMode() {
+            document.body.classList.remove('fullscreen');
+            document.getElementById('exitFullscreenBtn').style.display = 'none';
+            document.getElementById('enterFullscreenBtn').style.display = 'block';
+            resizeCanvas();
         }
         
         async function toggleCamera() {
