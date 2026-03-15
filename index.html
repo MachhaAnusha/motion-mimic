@@ -1098,7 +1098,7 @@
                                 }
                                 
                                 // Run selfie segmentation for Neon Human Outline filter
-                                if (selfieSegmentation && cameraOn && (currentFilter === 2 || currentFilter === 4 || currentFilter === 6)) {
+                                if (selfieSegmentation && cameraOn && (currentFilter === 2 || currentFilter === 4 || currentFilter === 6 || currentFilter === 7)) {
                                     try {
                                         await selfieSegmentation.send({ image: video });
                                     } catch (error) {
@@ -5268,15 +5268,15 @@
             }
 
             // ── STEP 6: Blit offscreen then composite LIVE silhouette ─
-            // Draw the swirling strokes first, then stamp the person's
-            // current silhouette on top as a dark mask. Because this
-            // happens on the main canvas (not offscreen), it is always
-            // the current frame's position — never frozen or accumulated.
             ctx.globalAlpha = 1;
             ctx.shadowBlur  = 0;
             ctx.drawImage(vgOffscreen, 0, 0); // swirling paint layer
 
-            // Composite live silhouette on top of strokes
+            // Composite live silhouette on top of strokes.
+            // The transparent hole in vgOffscreen shows black (#000) underneath.
+            // We need the body to be VISIBLY distinct — so we draw:
+            //   a) A dark navy fill for body interior
+            //   b) A soft glowing edge outline so silhouette reads as human
             if (segmentationMask) {
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width  = PROCESSING_WIDTH;
@@ -5285,33 +5285,62 @@
                 tempCtx.drawImage(segmentationMask, 0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT);
                 const maskData = tempCtx.getImageData(0, 0, PROCESSING_WIDTH, PROCESSING_HEIGHT).data;
 
-                // Build a full-res silhouette image on a temp canvas
-                // then draw it on the main canvas in one call (fast)
+                // Build silhouette on a canvas the size of the display
                 const silCanvas = document.createElement('canvas');
                 silCanvas.width  = cw;
                 silCanvas.height = ch;
                 const silCtx = silCanvas.getContext('2d');
 
-                silCtx.fillStyle = '#070d1f'; // deep navy — person body colour
-
+                // Pass 1: dark body fill — slightly lighter than pure black
+                // so it reads as a shape against the #000 background
+                silCtx.fillStyle = '#0e1a35';
                 for (let py = 0; py < PROCESSING_HEIGHT; py += 3) {
                     for (let px = 0; px < PROCESSING_WIDTH; px += 3) {
                         const idx = (py * PROCESSING_WIDTH + px) * 4;
-                        if (maskData[idx] > 200) { // person pixel
-                            const sx = cw - (px / PROCESSING_WIDTH) * cw; // mirror X
+                        if (maskData[idx] > 200) {
+                            const sx = cw - (px / PROCESSING_WIDTH) * cw;
                             const sy = (py / PROCESSING_HEIGHT) * ch;
                             silCtx.fillRect(sx - 5, sy - 5, 10, 10);
                         }
                     }
                 }
 
-                // Draw the live silhouette over the swirling strokes
-                ctx.globalAlpha = 0.92;
+                // Pass 2: glowing edge — scan for body boundary pixels and
+                // paint a bright blue-white glow exactly at the silhouette edge.
+                // This makes the human shape read clearly like in the reference image.
+                silCtx.shadowBlur  = 12;
+                silCtx.shadowColor = 'rgba(100,180,255,0.9)';
+                silCtx.fillStyle   = 'rgba(120,200,255,0.7)';
+                const stride = 4; // check every 4th pixel for edge detection speed
+                for (let py = stride; py < PROCESSING_HEIGHT - stride; py += stride) {
+                    for (let px = stride; px < PROCESSING_WIDTH - stride; px += stride) {
+                        const idx = (py * PROCESSING_WIDTH + px) * 4;
+                        if (maskData[idx] > 200) {
+                            // Check if any neighbour is background (edge pixel)
+                            const above = ((py - stride) * PROCESSING_WIDTH + px) * 4;
+                            const below = ((py + stride) * PROCESSING_WIDTH + px) * 4;
+                            const left  = (py * PROCESSING_WIDTH + (px - stride)) * 4;
+                            const right = (py * PROCESSING_WIDTH + (px + stride)) * 4;
+                            const isEdge = maskData[above] < 100 || maskData[below] < 100 ||
+                                           maskData[left]  < 100 || maskData[right]  < 100;
+                            if (isEdge) {
+                                const sx = cw - (px / PROCESSING_WIDTH) * cw;
+                                const sy = (py / PROCESSING_HEIGHT) * ch;
+                                silCtx.fillRect(sx - 3, sy - 3, 6, 6);
+                            }
+                        }
+                    }
+                }
+                silCtx.shadowBlur = 0;
+
+                // Draw the complete silhouette (body + glowing edge) onto the main canvas
+                ctx.globalAlpha = 1;
                 ctx.drawImage(silCanvas, 0, 0);
                 ctx.globalAlpha = 1;
             }
 
             ctx.shadowColor = 'transparent';
+            ctx.shadowBlur  = 0;
         }
 
         window.addEventListener('load', init);
