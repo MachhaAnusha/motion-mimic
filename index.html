@@ -4795,7 +4795,7 @@
                                 const sx  = Math.max(0, Math.min(PROCESSING_WIDTH  - 1, maskX + dx));
                                 const sy  = Math.max(0, Math.min(PROCESSING_HEIGHT - 1, maskY + dy));
                                 const idx = (sy * PROCESSING_WIDTH + sx) * 4;
-                                if (rawMask[idx] < 50) votes++; // person = dark/low value with selfieMode:false
+                                if (rawMask[idx] > 200) votes++; // person = bright/high value, matches applySegmentationMask()
                             }
                         }
                         if (votes < 7) continue; // ✅ strong majority required
